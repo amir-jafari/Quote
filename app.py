@@ -371,7 +371,7 @@ def verse_actions(row, key: str, card: bool = True):
         style = {"Quran": "Emerald", "Bible": "Royal", "Torah": "Gold"}[row["scripture"]]
         c2.download_button("🖼️ Quote card", quote_png(row["text"], row["ref"], style),
                            file_name=f"{row['ref'].replace(' ', '_').replace(':', '-')}.png",
-                           mime="image/png", key=f"card_{key}", use_container_width=True)
+                           mime="image/png", key=f"card_{key}", use_container_width=True, on_click="ignore")
 
 
 def stat_tile(col, value, label):
@@ -648,7 +648,7 @@ with tabs[2]:
                             unsafe_allow_html=True)
             st.download_button("⬇️ Download all results (CSV)",
                                hits[["scripture", "version", "ref", "text"]].to_csv(index=False).encode(),
-                               file_name=f"search_{q.strip().replace(' ', '_')}.csv", mime="text/csv")
+                               file_name=f"search_{q.strip().replace(' ', '_')}.csv", mime="text/csv", on_click="ignore")
         else:
             st.info("No matches. Try “Word & its forms” or a wider scope.")
     else:
@@ -686,7 +686,7 @@ with tabs[3]:
             return
         st.image(png, use_container_width=True)
         st.download_button("⬇️ Download PNG", png, file_name=f"wordcloud_{name}.png",
-                           mime="image/png", key=key)
+                           mime="image/png", key=key, on_click="ignore")
 
     if cmode == "Current selection":
         label = f"{scripture} · {version}" + ("" if book == "All books" else f" · {book}")
@@ -896,16 +896,16 @@ with tabs[6]:
             a, b, _ = st.columns([1, 1, 4])
             a.download_button("🖼️ Quote card", quote_png(f["text"], f["ref"], style),
                               file_name=f"{f['ref'].replace(' ', '_').replace(':', '-')}.png",
-                              mime="image/png", key=f"fcard_{i}", use_container_width=True)
+                              mime="image/png", key=f"fcard_{i}", use_container_width=True, on_click="ignore")
             if b.button("🗑️ Remove", key=f"rm_{i}", use_container_width=True):
                 favs.pop(i)
                 st.rerun()
         md = "\n\n".join(f"> {f['text']}\n>\n" + (f"> {f['original']}\n>\n" if f.get("original") else "")
                            + f"> — **{f['ref']}** ({f['version']})" for f in favs)
         x1, x2, _ = st.columns([1, 1, 3])
-        x1.download_button("⬇️ Export as Markdown", md.encode(), "my_verses.md", "text/markdown")
+        x1.download_button("⬇️ Export as Markdown", md.encode(), "my_verses.md", "text/markdown", on_click="ignore")
         x2.download_button("⬇️ Export as CSV", pd.DataFrame(favs).to_csv(index=False).encode(),
-                           "my_verses.csv", "text/csv")
+                           "my_verses.csv", "text/csv", on_click="ignore")
         st.write("")
         with st.expander("👀 Preview a quote card"):
             sel = st.selectbox("Verse", range(len(favs)), format_func=lambda j: favs[j]["ref"], key="prev_sel")

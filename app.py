@@ -135,8 +135,14 @@ def nice_pool(scripture: str, version: str) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner="Building word cloud…")
-def cached_cloud(texts: tuple, **kw):
-    return an.make_wordcloud(pd.Series(texts), **kw)
+def cached_cloud(texts: tuple, **kw) -> bytes | None:
+    import io
+    img = an.make_wordcloud(pd.Series(texts), **kw)
+    if img is None:
+        return None
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, format="PNG")
+    return buf.getvalue()
 
 
 @st.cache_data(show_spinner="Computing statistics…")
@@ -669,15 +675,17 @@ with tabs[3]:
                 extra_stop=frozenset(extra_stop))
 
     def cloud_and_download(texts, name, key):
-        img = cached_cloud(tuple(texts), **opts)
-        if img is None:
+        try:
+            png = cached_cloud(tuple(texts), **opts)
+        except Exception as e:  # show the real cause instead of a blank area
+            st.error(f"Could not build the word cloud: {type(e).__name__}: {e}")
+            st.exception(e)
+            return
+        if png is None:
             st.info("Not enough words to draw a cloud.")
             return
-        st.image(img, use_container_width=True)
-        import io
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        st.download_button("⬇️ Download PNG", buf.getvalue(), file_name=f"wordcloud_{name}.png",
+        st.image(png, use_container_width=True)
+        st.download_button("⬇️ Download PNG", png, file_name=f"wordcloud_{name}.png",
                            mime="image/png", key=key)
 
     if cmode == "Current selection":

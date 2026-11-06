@@ -80,6 +80,9 @@ html, body, [class*="css"], .stMarkdown, .stText { font-family: 'Inter', sans-se
 .hero p { margin: 6px 0 0; opacity: .92; font-size: 1.05rem; }
 .hero .chips span { display:inline-block; margin: 12px 8px 0 0; padding: 4px 12px; border-radius: 999px;
   background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35); font-size: .85rem; }
+a.dl-btn { padding: 8px 16px; border-radius: 8px; border: 1px solid rgba(127,127,127,.35);
+  text-decoration: none !important; color: inherit !important; font-weight: 500; margin: 4px 0 10px; }
+a.dl-btn:hover { border-color: #ff4b4b; color: #ff4b4b !important; }
 .verse-card {
   background: var(--card-bg); border: 1px solid var(--card-border); border-left: 6px solid var(--accent);
   border-radius: 16px; padding: 18px 22px; margin: 8px 0 6px;
@@ -143,6 +146,25 @@ def cached_cloud(texts: tuple, **kw) -> bytes | None:
     buf = io.BytesIO()
     img.convert("RGB").save(buf, format="PNG")
     return buf.getvalue()
+
+
+# Images and downloads are embedded in the page as base64 data URIs instead of going
+# through Streamlit's /media endpoint, which is unreachable on some Streamlit Cloud
+# setups (broken images, downloads failing with a "<hash>.txt ... Site wasn't available").
+def show_png(png: bytes, width: int | None = None, target=st) -> None:
+    import base64
+    w = f"{width}px" if width else "100%"
+    target.markdown(f'<img src="data:image/png;base64,{base64.b64encode(png).decode()}" '
+                    f'style="width:{w};max-width:100%;border-radius:10px;">', unsafe_allow_html=True)
+
+
+def download_link(label: str, data: bytes, file_name: str, mime: str, target=st, full_width: bool = False) -> None:
+    import base64
+    style = "display:block;text-align:center;" if full_width else "display:inline-block;"
+    target.markdown(
+        f'<a class="dl-btn" style="{style}" download="{html.escape(file_name, quote=True)}" '
+        f'href="data:{mime};base64,{base64.b64encode(data).decode()}">{html.escape(label)}</a>',
+        unsafe_allow_html=True)
 
 
 @st.cache_data(show_spinner="Computing statistics…")
@@ -369,9 +391,9 @@ def verse_actions(row, key: str, card: bool = True):
     c1.button("⭐ Save", key=f"fav_{key}", on_click=add_fav, args=(row,), use_container_width=True)
     if card:
         style = {"Quran": "Emerald", "Bible": "Royal", "Torah": "Gold"}[row["scripture"]]
-        c2.download_button("🖼️ Quote card", quote_png(row["text"], row["ref"], style),
-                           file_name=f"{row['ref'].replace(' ', '_').replace(':', '-')}.png",
-                           mime="image/png", key=f"card_{key}", use_container_width=True, on_click="ignore")
+        download_link("🖼️ Quote card", quote_png(row["text"], row["ref"], style),
+                      f"{row['ref'].replace(' ', '_').replace(':', '-')}.png", "image/png",
+                      target=c2, full_width=True)
 
 
 def stat_tile(col, value, label):
@@ -646,9 +668,9 @@ with tabs[2]:
             for i, (_, r) in enumerate(show.head(n_show).iterrows()):
                 st.markdown(verse_html(as_sentence(r) if whole else dict(r), pattern=qpat),
                             unsafe_allow_html=True)
-            st.download_button("⬇️ Download all results (CSV)",
-                               hits[["scripture", "version", "ref", "text"]].to_csv(index=False).encode(),
-                               file_name=f"search_{q.strip().replace(' ', '_')}.csv", mime="text/csv", on_click="ignore")
+            download_link("⬇️ Download all results (CSV)",
+                          hits[["scripture", "version", "ref", "text"]].to_csv(index=False).encode(),
+                          f"search_{q.strip().replace(' ', '_')}.csv", "text/csv")
         else:
             st.info("No matches. Try “Word & its forms” or a wider scope.")
     else:
@@ -684,9 +706,8 @@ with tabs[3]:
         if png is None:
             st.info("Not enough words to draw a cloud.")
             return
-        st.image(png, use_container_width=True)
-        st.download_button("⬇️ Download PNG", png, file_name=f"wordcloud_{name}.png",
-                           mime="image/png", key=key, on_click="ignore")
+        show_png(png)
+        download_link("⬇️ Download PNG", png, f"wordcloud_{name}.png", "image/png")
 
     if cmode == "Current selection":
         label = f"{scripture} · {version}" + ("" if book == "All books" else f" · {book}")
@@ -894,19 +915,19 @@ with tabs[6]:
         for i, f in enumerate(favs):
             st.markdown(verse_html(f), unsafe_allow_html=True)
             a, b, _ = st.columns([1, 1, 4])
-            a.download_button("🖼️ Quote card", quote_png(f["text"], f["ref"], style),
-                              file_name=f"{f['ref'].replace(' ', '_').replace(':', '-')}.png",
-                              mime="image/png", key=f"fcard_{i}", use_container_width=True, on_click="ignore")
+            download_link("🖼️ Quote card", quote_png(f["text"], f["ref"], style),
+                          f"{f['ref'].replace(' ', '_').replace(':', '-')}.png", "image/png",
+                          target=a, full_width=True)
             if b.button("🗑️ Remove", key=f"rm_{i}", use_container_width=True):
                 favs.pop(i)
                 st.rerun()
         md = "\n\n".join(f"> {f['text']}\n>\n" + (f"> {f['original']}\n>\n" if f.get("original") else "")
                            + f"> — **{f['ref']}** ({f['version']})" for f in favs)
         x1, x2, _ = st.columns([1, 1, 3])
-        x1.download_button("⬇️ Export as Markdown", md.encode(), "my_verses.md", "text/markdown", on_click="ignore")
-        x2.download_button("⬇️ Export as CSV", pd.DataFrame(favs).to_csv(index=False).encode(),
-                           "my_verses.csv", "text/csv", on_click="ignore")
+        download_link("⬇️ Export as Markdown", md.encode(), "my_verses.md", "text/markdown", target=x1)
+        download_link("⬇️ Export as CSV", pd.DataFrame(favs).to_csv(index=False).encode(),
+                      "my_verses.csv", "text/csv", target=x2)
         st.write("")
         with st.expander("👀 Preview a quote card"):
             sel = st.selectbox("Verse", range(len(favs)), format_func=lambda j: favs[j]["ref"], key="prev_sel")
-            st.image(quote_png(favs[sel]["text"], favs[sel]["ref"], style), width=420)
+            show_png(quote_png(favs[sel]["text"], favs[sel]["ref"], style), width=420)

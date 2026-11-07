@@ -520,20 +520,36 @@ with tabs[0]:
 
     st.divider()
     st.subheader("🌍 One theme, three traditions")
-    st.caption("The same theme drawn from each scripture side by side. Hit shuffle for a new set.")
+    st.caption("The same theme drawn from each scripture side by side. Your sidebar scripture comes first and "
+               "uses your chosen translation, section and book. Hit shuffle for a new set.")
     t1, t2 = st.columns([2, 5])
     trio_theme = t1.selectbox("Theme", list(an.THEMES), format_func=theme_label, key="trio_theme")
-    if t2.button("🔄 Shuffle trio") or st.session_state.trio is None or st.session_state.trio[0] != trio_theme:
-        picks = []
-        for s in SCRIPTURES:
-            p = an.theme_filter(nice_pool(s, DEFAULT_VERSION[s]), trio_theme)
+    trio_order = [scripture] + [s for s in SCRIPTURES if s != scripture]
+    trio_ctx = (trio_theme, scripture, version, section, book)
+    if t2.button("🔄 Shuffle trio") or st.session_state.trio is None or st.session_state.trio[0] != trio_ctx:
+        picks, notes = [], []
+        for s in trio_order:
+            note = None
+            if s == scripture:
+                base = an.nice_verses(scope)
+                p = an.theme_filter(base if len(base) else scope, trio_theme)
+                if p.empty and (section != "All sections" or book != "All books"):
+                    # Nothing on this theme in the narrowed scope: widen to the whole scripture.
+                    p = an.theme_filter(nice_pool(s, version), trio_theme)
+                    note = f"No {trio_theme.lower()} verse in your current selection, so this one is from the whole {s}."
+            else:
+                p = an.theme_filter(nice_pool(s, DEFAULT_VERSION[s]), trio_theme)
             picks.append(p.sample(1).iloc[0].to_dict() if len(p) else None)
-        st.session_state.trio = (trio_theme, picks)
+            notes.append(note)
+        st.session_state.trio = (trio_ctx, trio_order, picks, notes)
+    _, order, picks, notes = st.session_state.trio
     cols = st.columns(3)
-    for col, p, s in zip(cols, st.session_state.trio[1], SCRIPTURES):
+    for col, p, s, note in zip(cols, picks, order, notes):
         with col:
             if p:
                 st.markdown(verse_html(p, pattern=an.theme_pattern(trio_theme)), unsafe_allow_html=True)
+                if note:
+                    st.caption(note)
                 st.button("⭐ Save", key=f"trio_{s}", on_click=add_fav, args=(p,))
             else:
                 st.info(f"No {trio_theme.lower()} verse found in the {s}.")

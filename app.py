@@ -474,6 +474,17 @@ st.markdown(f"""
   <span>📚 {n_versions} translations</span><span>📖 {tot_verses:,} verses</span></div>
 </div>""", unsafe_allow_html=True)
 
+def matched_version(s: str) -> str:
+    """Translation to use for scripture `s` given the sidebar choice: the sidebar version for the
+    sidebar scripture; for the others the same translation when the user picked a non-default one
+    they also have (KJV / ASV / YLT), otherwise their default (so the Torah stays on JPS 1917)."""
+    if s == scripture:
+        return version
+    if version != DEFAULT_VERSION[scripture] and version in CATALOG[s]["versions"]:
+        return version
+    return DEFAULT_VERSION[s]
+
+
 tabs = st.tabs(["✨ Inspire", "📖 Read", "🔍 Search", "☁️ Word Cloud", "📊 Word Insights",
                 "⚖️ Compare Translations", "⭐ My Collection"])
 THEME_OPTS = ["Any"] + list(an.THEMES)
@@ -493,7 +504,7 @@ with tabs[0]:
     daily = b2.button("📅 Verse of the day", use_container_width=True)
 
     if source == "Any scripture":
-        pool = pd.concat([nice_pool(s, DEFAULT_VERSION[s]) for s in SCRIPTURES])
+        pool = pd.concat([nice_pool(s, matched_version(s)) for s in SCRIPTURES])
     else:
         pool = an.nice_verses(scope)
         if pool.empty:
@@ -509,7 +520,7 @@ with tabs[0]:
     elif draw:
         st.session_state.insp_daily = False
     daily_mode = st.session_state.get("insp_daily", False)
-    ctx = (theme, source) if source == "Any scripture" else (theme, source, scripture, version, section, book)
+    ctx = (theme, source, scripture, version) + ((section, book) if source == "Current selection" else ())
     changed = st.session_state.get("pick_ctx") != ctx
     if draw or daily or changed or st.session_state.pick is None:
         st.session_state.pick_ctx = ctx
@@ -549,12 +560,7 @@ with tabs[0]:
                     p = an.theme_filter(nice_pool(s, version), trio_theme)
                     note = f"No {trio_theme.lower()} verse in your current selection, so this one is from the whole {s}."
             else:
-                # Match the sidebar translation only when the user picked a non-default one
-                # that this scripture also has (KJV / ASV / YLT); otherwise keep its default,
-                # so the Torah stays on JPS 1917 while the Bible is on its default KJV.
-                picked = version != DEFAULT_VERSION[scripture]
-                v = version if picked and version in CATALOG[s]["versions"] else DEFAULT_VERSION[s]
-                p = an.theme_filter(nice_pool(s, v), trio_theme)
+                p = an.theme_filter(nice_pool(s, matched_version(s)), trio_theme)
             picks.append(p.sample(1).iloc[0].to_dict() if len(p) else None)
             notes.append(note)
         st.session_state.trio = (trio_ctx, trio_order, picks, notes)

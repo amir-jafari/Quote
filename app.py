@@ -528,7 +528,12 @@ with tabs[0]:
             st.warning("No verse matches that theme in this selection. Try another theme or a wider selection.")
         else:
             seed = int(dt.date.today().strftime("%Y%m%d")) if daily_mode else None
-            st.session_state.pick = pool.sample(1, random_state=seed).iloc[0].to_dict()
+            # With "Any scripture", weight each verse by 1 / (verses from its scripture in the pool)
+            # so every scripture is equally likely, however many verses it has.
+            weights = None
+            if source == "Any scripture":
+                weights = 1.0 / pool.groupby("scripture")["scripture"].transform("size")
+            st.session_state.pick = pool.sample(1, weights=weights, random_state=seed).iloc[0].to_dict()
 
     if st.session_state.pick:
         pick = st.session_state.pick

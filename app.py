@@ -521,7 +521,8 @@ with tabs[0]:
     st.divider()
     st.subheader("🌍 One theme, three traditions")
     st.caption("The same theme drawn from each scripture side by side. Your sidebar scripture comes first and "
-               "uses your chosen translation, section and book. Hit shuffle for a new set.")
+               "uses your chosen translation, section and book; the others use the same translation where they have it. "
+               "Hit shuffle for a new set.")
     t1, t2 = st.columns([2, 5])
     trio_theme = t1.selectbox("Theme", list(an.THEMES), format_func=theme_label, key="trio_theme")
     trio_order = [scripture] + [s for s in SCRIPTURES if s != scripture]
@@ -538,7 +539,10 @@ with tabs[0]:
                     p = an.theme_filter(nice_pool(s, version), trio_theme)
                     note = f"No {trio_theme.lower()} verse in your current selection, so this one is from the whole {s}."
             else:
-                p = an.theme_filter(nice_pool(s, DEFAULT_VERSION[s]), trio_theme)
+                # Use the same translation as the sidebar when this scripture has it
+                # (e.g. KJV / ASV / YLT exist for both Bible and Torah); otherwise its default.
+                v = version if version in CATALOG[s]["versions"] else DEFAULT_VERSION[s]
+                p = an.theme_filter(nice_pool(s, v), trio_theme)
             picks.append(p.sample(1).iloc[0].to_dict() if len(p) else None)
             notes.append(note)
         st.session_state.trio = (trio_ctx, trio_order, picks, notes)

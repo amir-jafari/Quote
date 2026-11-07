@@ -539,9 +539,11 @@ with tabs[0]:
                     p = an.theme_filter(nice_pool(s, version), trio_theme)
                     note = f"No {trio_theme.lower()} verse in your current selection, so this one is from the whole {s}."
             else:
-                # Use the same translation as the sidebar when this scripture has it
-                # (e.g. KJV / ASV / YLT exist for both Bible and Torah); otherwise its default.
-                v = version if version in CATALOG[s]["versions"] else DEFAULT_VERSION[s]
+                # Match the sidebar translation only when the user picked a non-default one
+                # that this scripture also has (KJV / ASV / YLT); otherwise keep its default,
+                # so the Torah stays on JPS 1917 while the Bible is on its default KJV.
+                picked = version != DEFAULT_VERSION[scripture]
+                v = version if picked and version in CATALOG[s]["versions"] else DEFAULT_VERSION[s]
                 p = an.theme_filter(nice_pool(s, v), trio_theme)
             picks.append(p.sample(1).iloc[0].to_dict() if len(p) else None)
             notes.append(note)

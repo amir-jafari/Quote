@@ -502,6 +502,13 @@ with tabs[0]:
 
     # Redraw automatically whenever the sidebar selection (or theme / source) changes,
     # so the verse always comes from what is currently selected.
+    # "Verse of the day" mode is remembered until "Inspire me" is pressed, so a dropdown
+    # change shows today's verse for the new selection rather than a random one.
+    if daily:
+        st.session_state.insp_daily = True
+    elif draw:
+        st.session_state.insp_daily = False
+    daily_mode = st.session_state.get("insp_daily", False)
     ctx = (theme, source) if source == "Any scripture" else (theme, source, scripture, version, section, book)
     changed = st.session_state.get("pick_ctx") != ctx
     if draw or daily or changed or st.session_state.pick is None:
@@ -509,13 +516,16 @@ with tabs[0]:
         if pool.empty:
             st.warning("No verse matches that theme in this selection. Try another theme or a wider selection.")
         else:
-            seed = int(dt.date.today().strftime("%Y%m%d")) if daily else None
+            seed = int(dt.date.today().strftime("%Y%m%d")) if daily_mode else None
             st.session_state.pick = pool.sample(1, random_state=seed).iloc[0].to_dict()
 
     if st.session_state.pick:
         pick = st.session_state.pick
         pat = an.theme_pattern(theme) if theme != "Any" else None
         st.markdown(verse_html(pick, big=True, pattern=pat), unsafe_allow_html=True)
+        if daily_mode:
+            st.caption(f"📅 Verse of the day for {dt.date.today():%B %d, %Y}, drawn from your current choices. "
+                       "Press ✨ Inspire me for a random verse.")
         verse_actions(pick, "pick")
 
     st.divider()

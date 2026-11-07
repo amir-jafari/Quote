@@ -427,7 +427,7 @@ def parse_words(raw: str) -> list[str]:
 with st.sidebar:
     st.markdown('<div class="sb-title">📜 Sacred Words</div>', unsafe_allow_html=True)
     st.caption("Pick a scripture, a translation and a part to explore.")
-    scripture = st.selectbox("Scripture", SCRIPTURES, format_func=lambda s: f"{CATALOG[s]['icon']}  {s}")
+    scripture = st.selectbox("Scripture", SCRIPTURES, index=SCRIPTURES.index("Bible"), format_func=lambda s: f"{CATALOG[s]['icon']}  {s}")
     versions = list(CATALOG[scripture]["versions"])
     version = st.selectbox("Version / translation", versions,
                            index=versions.index(DEFAULT_VERSION[scripture]))
@@ -500,7 +500,12 @@ with tabs[0]:
             pool = scope
     pool = an.theme_filter(pool, theme)
 
-    if draw or daily or st.session_state.pick is None:
+    # Redraw automatically whenever the sidebar selection (or theme / source) changes,
+    # so the verse always comes from what is currently selected.
+    ctx = (theme, source) if source == "Any scripture" else (theme, source, scripture, version, section, book)
+    changed = st.session_state.get("pick_ctx") != ctx
+    if draw or daily or changed or st.session_state.pick is None:
+        st.session_state.pick_ctx = ctx
         if pool.empty:
             st.warning("No verse matches that theme in this selection. Try another theme or a wider selection.")
         else:

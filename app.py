@@ -566,7 +566,9 @@ with tabs[0]:
                     note = f"No {trio_theme.lower()} verse in your current selection, so this one is from the whole {s}."
             else:
                 p = an.theme_filter(nice_pool(s, matched_version(s)), trio_theme)
-            picks.append(p.sample(1).iloc[0].to_dict() if len(p) else None)
+            # Give every book (surah for the Quran) an equal chance, however many matching verses it has.
+            w = 1.0 / p.groupby("book")["book"].transform("size") if len(p) else None
+            picks.append(p.sample(1, weights=w).iloc[0].to_dict() if len(p) else None)
             notes.append(note)
         st.session_state.trio = (trio_ctx, trio_order, picks, notes)
     _, order, picks, notes = st.session_state.trio

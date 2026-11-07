@@ -528,11 +528,12 @@ with tabs[0]:
             st.warning("No verse matches that theme in this selection. Try another theme or a wider selection.")
         else:
             seed = int(dt.date.today().strftime("%Y%m%d")) if daily_mode else None
-            # With "Any scripture", weight each verse by 1 / (verses from its scripture in the pool)
-            # so every scripture is equally likely, however many verses it has.
-            weights = None
+            # Every book (surah) in the pool is equally likely, however many matching verses it has.
+            # With "Any scripture", each scripture is also equally likely: its share is split evenly
+            # across its books, so weight = 1 / (verses in the book x books in the scripture).
+            weights = 1.0 / pool.groupby(["scripture", "book"])["book"].transform("size")
             if source == "Any scripture":
-                weights = 1.0 / pool.groupby("scripture")["scripture"].transform("size")
+                weights = weights / pool.groupby("scripture")["book"].transform("nunique")
             st.session_state.pick = pool.sample(1, weights=weights, random_state=seed).iloc[0].to_dict()
 
     if st.session_state.pick:

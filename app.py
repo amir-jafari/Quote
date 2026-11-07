@@ -911,7 +911,9 @@ with tabs[5]:
     st.subheader(f"One verse, every {scripture} translation")
     def random_compare():
         pool_ = an.nice_verses(books_df)
-        r = (pool_ if len(pool_) else books_df).sample(1).iloc[0]
+        pool_ = pool_ if len(pool_) else books_df
+        # Every book (surah) is equally likely, however many verses it has.
+        r = pool_.sample(1, weights=1.0 / pool_.groupby("book")["book"].transform("size")).iloc[0]
         st.session_state.cmp_book, st.session_state.cmp_ch, st.session_state.cmp_v = \
             r.book, int(r.chapter), int(r.verse)
 

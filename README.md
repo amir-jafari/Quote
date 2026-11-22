@@ -9,6 +9,7 @@ search them, find inspiring verses, make word clouds and compare word statistics
 pip install -r requirements.txt
 python data_loader.py      # optional: pre-downloads and caches all 18 translations into ./data
 python originals.py        # optional: pre-downloads the Arabic & Hebrew originals and verse mappings
+python companions.py       # optional: pre-downloads the Persian & Spanish translations
 streamlit run app.py
 ```
 
@@ -50,10 +51,21 @@ For the JPS 1917 text, the few chapters where this copy numbers verses different
 Exodus 20 and Deuteronomy 5) are matched verse by verse. The New Testament (written in Greek) and Douay-Rheims
 (Latin Vulgate numbering) show a note instead of Hebrew.
 
+## Persian & Spanish translations
+Switch on **Show Persian translation** and/or **Show Spanish translation** in the sidebar to add them under every
+verse card (Inspire, Search, Collection…), as extra columns in the **Read** grid, and in **Compare Translations**.
+Saved verses keep them and the Markdown export includes them.
+- **Quran**: Persian — Makarem Shirazi (default), Fooladvand, Ansarian, Elahi Ghomshei; Spanish — Julio Cortés
+  (default), Raúl González Bórnez, Isa García (tanzil.net). The translator is picked in the sidebar.
+- **Bible & Torah**: Persian Old Version (ترجمه قدیم, 1895) and Spanish Reina-Valera 1909, both public domain
+  (eBible.org). They use English verse numbers; JPS 1917 verses are matched through the Hebrew numbering.
+  Douay-Rheims (Vulgate numbering) shows a note instead.
+
 ## Data sources
 - Quran: [tanzil.net](https://tanzil.net/trans/) translations (surah names from fawazahmed0/quran-api)
 - Bible / Tanakh, including the Hebrew WLC: [scrollmapper/bible_databases](https://github.com/scrollmapper/bible_databases)
 - Arabic Quran: [tanzil.net](https://tanzil.net/download/)
+- Persian & Spanish Bibles: [eBible.org](https://ebible.org/) (pesOPV, spaRV1909)
 - Versification: [Copenhagen Alliance versification-specification](https://github.com/Copenhagen-Alliance/versification-specification)
 
 ## Sentence quality

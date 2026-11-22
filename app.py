@@ -1,6 +1,7 @@
 """
 📜 Sacred Words Explorer
-Read, search, discover and visualise the Quran, the Bible and the Torah — in English.
+Read, search, discover and visualise the Quran, the Bible and the Torah — in English, with optional
+Persian and Spanish translations and the Arabic / Hebrew originals.
 
 Run:  streamlit run app.py
 """
@@ -18,6 +19,7 @@ import streamlit as st
 
 import analytics as an
 import originals as orig
+import companions as comp
 from data_loader import CATALOG, DEFAULT_VERSION, NEW_TESTAMENT, load_version
 
 # Webster Bible / Ali Quli Qarai are the default Bible / Quran translations. Set here as well as
@@ -27,39 +29,6 @@ DEFAULT_VERSION = {**DEFAULT_VERSION, "Bible": "Webster Bible", "Quran": "Ali Qu
 st.set_page_config(page_title="Sacred Words Explorer", page_icon="📜", layout="wide",
                    initial_sidebar_state="expanded")
 
-
-# --------------------------------------------------------------------------------------
-# Optional password gate: the password comes from st.secrets["APP_PASSWORD"]; if it is
-# missing or empty, the app is open to everyone
-# (.streamlit/secrets.toml locally, the app's "Secrets" settings on Streamlit Cloud)
-# --------------------------------------------------------------------------------------
-def _check_password() -> bool:
-    import hmac
-
-    if st.session_state.get("password_ok"):
-        return True
-    try:
-        expected = st.secrets["APP_PASSWORD"]
-    except Exception:  # missing key or no secrets file -> no password gate
-        return True
-    if not str(expected).strip():  # empty password -> no password gate
-        return True
-
-    def _entered():
-        ok = hmac.compare_digest(st.session_state.get("pw_input", ""), str(expected))
-        st.session_state["password_ok"] = ok
-        st.session_state["pw_failed"] = not ok
-        st.session_state.pop("pw_input", None)
-
-    st.markdown("## 📜 Sacred Words Explorer")
-    st.text_input("Password", type="password", key="pw_input", on_change=_entered)
-    if st.session_state.get("pw_failed"):
-        st.error("Incorrect password.")
-    return False
-
-
-if not _check_password():
-    st.stop()
 
 SCRIPTURES = list(CATALOG)
 COLORS = {s: CATALOG[s]["color"] for s in SCRIPTURES}
@@ -71,7 +40,7 @@ MAX_WORDS = len(SERIES)
 # Styling
 # --------------------------------------------------------------------------------------
 st.markdown("""
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500&family=Inter:wght@400;500;600;700&family=Amiri+Quran&family=Amiri:wght@400;700&family=Noto+Serif+Hebrew:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500&family=Inter:wght@400;500;600;700&family=Amiri+Quran&family=Amiri:wght@400;700&family=Noto+Serif+Hebrew:wght@400;500&family=Vazirmatn:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root { --card-bg: rgba(127,127,127,0.06); --card-border: rgba(127,127,127,0.18); --muted: rgba(127,127,127,0.95); }
 html, body, [class*="css"], .stMarkdown, .stText { font-family: 'Inter', sans-serif; }
@@ -107,13 +76,20 @@ a.dl-btn:hover { border-color: #ff4b4b; color: #ff4b4b !important; }
   border-top: 1px dashed var(--card-border); font-size: 1.6rem; line-height: 2.15; }
 .orig.ar { font-family: 'Amiri Quran', 'Amiri', 'Noto Naskh Arabic', serif; }
 .orig.he { font-family: 'Noto Serif Hebrew', 'SBL Hebrew', 'Times New Roman', serif; font-size: 1.5rem; line-height: 1.95; }
+.orig.es { direction: ltr; text-align: left; font-family: 'Cormorant Garamond', serif; font-size: 1.25rem; line-height: 1.5; }
+.olabel.es { text-align: left; }
+.orig.fa { font-family: 'Vazirmatn', 'Noto Naskh Arabic', Tahoma, sans-serif; font-size: 1.15rem; line-height: 2; }
 .verse-card.big .orig { font-size: 2.15rem; }
+.verse-card.big .orig.fa { font-size: 1.5rem; }
+.verse-card.big .orig.es { font-size: 1.7rem; line-height: 1.4; }
 .olabel { font-size: .74rem; color: var(--muted); text-align: right; margin-top: 2px; }
 .rgrid { display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 1fr)); column-gap: 28px; }
 .rgrid > div { padding: 9px 0; border-bottom: 1px solid var(--card-border); }
 .rgrid .head { font-family: 'Inter', sans-serif; font-size: .78rem; font-weight: 700; color: var(--accent);
   text-transform: uppercase; letter-spacing: .05em; border-bottom: 2px solid var(--accent); }
 .rgrid .orig { margin: 0; padding: 9px 0; border-top: none; font-size: 1.45rem; line-height: 1.9; }
+.rgrid .orig.fa { font-size: 1.1rem; line-height: 1.95; }
+.rgrid .orig.es { font-size: 1.2rem; line-height: 1.6; }
 @media (max-width: 760px) { .rgrid { grid-template-columns: 1fr; } .rgrid .head { display: none; } }
 mark { background: rgba(255, 200, 0, .45); padding: 0 2px; border-radius: 4px; color: inherit; }
 .stat { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 14px; padding: 14px 18px; }
@@ -342,12 +318,85 @@ def original_for(row) -> dict | None:
     return {"text": text, "lang": "he", "label": label}
 
 
+@st.cache_resource(show_spinner="Loading the translation…")
+def companion_quran(lang: str, name: str):
+    return comp.load_quran(lang, name)
+
+
+@st.cache_resource(show_spinner="Loading the translation…")
+def companion_bible(lang: str):
+    return comp.load_bible(lang)
+
+
+@st.cache_resource(show_spinner=False)
+def kjv_from_hebrew():
+    return comp.hebrew_to_kjv(orig.hebrew_lookup("KJV"))
+
+
+def lang_on(lang: str) -> bool:
+    return st.session_state.get(f"show_{comp.LANGS[lang]['code']}", False)
+
+
+def active_langs() -> list[str]:
+    return [lang for lang in comp.LANGS if lang_on(lang)]
+
+
+def companion_for(row, lang: str) -> dict | None:
+    """Persian / Spanish translation of a verse (or a joined passage), when its sidebar toggle is on.
+    Returns {"text", "lang", "label"}; a dict with only "label" when there is nothing to show."""
+    if not lang_on(lang) or "chapter" not in row:
+        return None
+    meta = comp.LANGS[lang]
+    digits = str.maketrans("0123456789", meta["digits"])
+    first, last = int(row.get("verse_first", row["verse"])), int(row.get("verse_last", row["verse"]))
+    chapter = int(row["chapter"])
+    if row["scripture"] == "Quran":
+        name = st.session_state.get(f"quran_{meta['code']}", meta["default_quran"])
+        tr = companion_quran(lang, name)
+        many = last > first
+        parts = [tr[(chapter, v)] + (f" ({str(v).translate(digits)})" if many else "")
+                 for v in range(first, last + 1) if (chapter, v) in tr]
+        return ({"text": " ".join(parts), "lang": meta["code"], "label": comp.quran_label(lang, name)}
+                if parts else None)
+    code = orig.source_code(row["scripture"], row["version"])
+    if code in comp.NO_PAIRING:
+        return {"label": comp.NOT_PAIRED.format(lang=lang)}
+    book = row["book"]
+    if code in comp.HEBREW_NUMBERED:
+        # JPS verse -> Hebrew verse(s) -> English (KJV) verse(s), the numbering these Bibles follow
+        heb = heb_map(row["scripture"], row["version"])
+        back = kjv_from_hebrew()
+        refs = [k for v in range(first, last + 1) for h in heb.get((book, chapter, v), [])
+                for k in back.get((book, *h), [])]
+        refs = list(dict.fromkeys(refs)) or [(chapter, v) for v in range(first, last + 1)]
+    else:
+        refs = [(chapter, v) for v in range(first, last + 1)]
+    bible = companion_bible(lang)
+    refs = [r for r in refs if (book, *r) in bible]
+    if not refs:
+        return {"label": meta["missing"]}
+    many = len(refs) > 1
+    text = " ".join(bible[(book, c, v)] + (f" ({str(v).translate(digits)})" if many else "") for c, v in refs)
+    label = meta["bible_label"]
+    if refs != [(chapter, v) for v in range(first, last + 1)]:
+        label += f" · English numbering {book} {_ref_span(refs)}"
+    return {"text": text, "lang": meta["code"], "label": label}
+
+
+def companions_html(row) -> str:
+    return "".join(original_html(companion_for(row, lang)) for lang in active_langs())
+
+
+def text_dir(lang: str) -> str:
+    return "ltr" if lang == "es" else "rtl"
+
+
 def original_html(o: dict | None) -> str:
     if not o:
         return ""
-    body = (f'<div class="orig {o["lang"]}" lang="{o["lang"]}">{html.escape(o["text"])}</div>'
-            if o.get("text") else "")
-    return body + f'<div class="olabel">{html.escape(o["label"])}</div>'
+    body = (f'<div class="orig {o["lang"]}" lang="{o["lang"]}" dir="{text_dir(o["lang"])}">'
+            f'{html.escape(o["text"])}</div>' if o.get("text") else "")
+    return body + f'<div class="olabel {o.get("lang", "")}">{html.escape(o["label"])}</div>'
 
 
 def as_sentence(row) -> dict:
@@ -375,7 +424,9 @@ def verse_html(row, big: bool = False, pattern: str | None = None, show_version:
     return (f'<div class="verse-card {"big" if big else ""}" style="--accent:{color}">'
             f'<div class="txt">{highlight(row["text"], pattern)}</div>'
             f'<div class="ref">{icon} {html.escape(row["ref"])}</div>'
-            f'<div class="meta">{html.escape(meta)}</div>{original_html(original_for(row)) if with_original else ""}</div>')
+            f'<div class="meta">{html.escape(meta)}</div>'
+            + (companions_html(row) + original_html(original_for(row)) if with_original else "")
+            + "</div>")
 
 
 def add_fav(row):
@@ -384,6 +435,9 @@ def add_fav(row):
     item.update({k: row[k] for k in ["verse_first", "verse_last"] if k in row})
     o = original_for(row)
     item["original"] = o.get("text", "") if o else ""
+    for lang in comp.LANGS:
+        c = companion_for(row, lang)
+        item[lang.lower()] = c.get("text", "") if c else ""
     if item["ref"] + item["version"] not in {f["ref"] + f["version"] for f in st.session_state.favs}:
         st.session_state.favs.append(item)
         st.toast(f"Saved {item['ref']} to your collection ⭐")
@@ -454,6 +508,13 @@ with st.sidebar:
     if scripture != "Quran" and st.session_state.get("show_orig", True):
         st.radio("Hebrew marks", ["Vowels only", "Vowels & cantillation", "Consonants only"], key="heb_marks",
                  help="Cantillation marks are the chanting accents; consonant-only text is how a Torah scroll is written.")
+    for lang, meta in comp.LANGS.items():
+        st.toggle(f"Show {lang} translation ({meta['native']})", False, key=f"show_{meta['code']}",
+                  help=f"Adds the {lang} translation under every verse, in the reader and in Compare Translations. "
+                       f"Bible and Torah: {meta['bible_label'].split(' · ')[1]}. Quran: choose the translator below.")
+        if lang_on(lang):
+            st.selectbox(f"{lang} Quran translation", list(meta["quran"]), key=f"quran_{meta['code']}",
+                         index=list(meta["quran"]).index(meta["default_quran"]))
     st.divider()
     st.markdown(f"**⭐ Collection:** {len(st.session_state.favs)} saved")
     with st.expander("ℹ️ About & sources"):
@@ -461,6 +522,11 @@ with st.sidebar:
             "- **Quran** (English translations): tanzil.net, with full punctuation\n"
             "- **Bible & Torah/Tanakh** (public-domain translations): `scrollmapper/bible_databases`\n"
             "- **Arabic Quran**: Uthmani script from tanzil.net\n"
+            "- **Persian**: Quran translations from tanzil.net (Makarem Shirazi, Fooladvand, Ansarian, "
+            "Elahi Ghomshei); Bible & Torah from the Persian Old Version (1895, public domain) via eBible.org. "
+            "It follows English verse numbers, so JPS verses are matched through the Hebrew numbering\n"
+            "- **Spanish**: Quran translations from tanzil.net (Julio Cortés, Raúl González Bórnez, Isa García); "
+            "Bible & Torah from the Reina-Valera 1909 (public domain) via eBible.org, matched the same way\n"
             "- **Hebrew Bible**: Westminster Leningrad Codex. English verse numbers are converted to Hebrew "
             "numbering with the standard Copenhagen Alliance versification table (e.g. KJV Malachi 4:1 = Hebrew 3:19)\n"
             "- *Torah* here covers the Hebrew Bible: the five books of Moses plus Nevi'im and Ketuvim. "
@@ -632,23 +698,32 @@ with tabs[1]:
     title = rbook if scripture == "Quran" else f"{rbook} {rch}"
 
     def reader_grid(frames: list[tuple[str, pd.DataFrame]]) -> str:
-        """Verse-by-verse grid: one column per English version plus the original language."""
+        """Verse-by-verse grid: one column per English version plus the Persian and the original language."""
         base = frames[0][1]
         others = [f.set_index("verse")["text"] for _, f in frames[1:]]
-        origs = [original_for(r) for r in base.to_dict("records")]
+        recs = base.to_dict("records")
+        origs = [original_for(r) for r in recs]
+        comps = {lang: [companion_for(r, lang) for r in recs] for lang in active_langs()}
+        comps = {k: v for k, v in comps.items() if any(c and c.get("text") for c in v)}
         has_orig = any(o and o.get("text") for o in origs)
         lang = next((o["lang"] for o in origs if o and o.get("text")), "")
-        heads = [lbl for lbl, _ in frames] + (
-            ["Arabic original" if lang == "ar" else "Hebrew original"] if has_orig else [])
+        heads = ([lbl for lbl, _ in frames] + list(comps)
+                 + (["Arabic original" if lang == "ar" else "Hebrew original"] if has_orig else []))
         cells = "".join(f'<div class="head">{html.escape(h)}</div>' for h in heads)
-        for (_, r), o in zip(base.iterrows(), origs):
+
+        def rtl_cell(o):
+            return (f'<div class="orig {o["lang"]}" lang="{o["lang"]}" dir="{text_dir(o["lang"])}">'
+                    f'{html.escape(o["text"])}</div>' if o and o.get("text") else "<div></div>")
+
+        for i, ((_, r), o) in enumerate(zip(base.iterrows(), origs)):
             cells += f'<div><sup>{r.verse}</sup>{highlight(r.text, pat)}</div>'
             for s_ in others:
                 cells += f'<div><sup>{r.verse}</sup>{highlight(s_.get(r.verse, ""), pat)}</div>'
+            for cs in comps.values():
+                cells += rtl_cell(cs[i])
             if has_orig:
-                cells += (f'<div class="orig {o["lang"]}" lang="{o["lang"]}">{html.escape(o["text"])}</div>'
-                          if o and o.get("text") else "<div></div>")
-        note = next((o["label"] for o in origs if o and not o.get("text")), "")
+                cells += rtl_cell(o)
+        note = " · ".join(dict.fromkeys(x["label"] for x in origs + [c for cs in comps.values() for c in cs] if x and not x.get("text")))
         return (f'<div class="reader" style="--accent:{accent}"><h3 style="font-family:Cormorant Garamond,serif;'
                 f'margin:.2rem 0 .8rem">{html.escape(title)}</h3>'
                 f'<div class="rgrid" style="--cols:{len(heads)}">{cells}</div>'
@@ -661,7 +736,7 @@ with tabs[1]:
                 f'{html.escape(label)}</div><h3 style="font-family:Cormorant Garamond,serif;margin:.4rem 0 1rem">'
                 f'{html.escape(title)}</h3>{body}</div>')
 
-    if st.session_state.get("show_orig", True):
+    if st.session_state.get("show_orig", True) or active_langs():
         frames = [(version, chap)]
         if parallel != "— none —":
             pdf = get(scripture, parallel)
@@ -948,6 +1023,11 @@ with tabs[5]:
         if o and o.get("text"):
             st.markdown(f'<div class="verse-card" style="--accent:{accent}"><div class="meta">Original</div>'
                         f'{original_html(o)}</div>', unsafe_allow_html=True)
+        for lang in active_langs():
+            c = companion_for(found[0], lang)
+            if c and c.get("text"):
+                st.markdown(f'<div class="verse-card" style="--accent:{accent}"><div class="meta">{lang}</div>'
+                            f'{original_html(c)}</div>', unsafe_allow_html=True)
     for i, r in enumerate(found):
         st.markdown(verse_html(r, with_original=False), unsafe_allow_html=True)
     if found:
@@ -981,6 +1061,7 @@ with tabs[6]:
                 favs.pop(i)
                 st.rerun()
         md = "\n\n".join(f"> {f['text']}\n>\n" + (f"> {f['original']}\n>\n" if f.get("original") else "")
+                           + "".join(f"> {f[k.lower()]}\n>\n" for k in comp.LANGS if f.get(k.lower()))
                            + f"> — **{f['ref']}** ({f['version']})" for f in favs)
         x1, x2, _ = st.columns([1, 1, 3])
         download_link("⬇️ Export as Markdown", md.encode(), "my_verses.md", "text/markdown", target=x1)

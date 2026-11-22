@@ -20,9 +20,9 @@ import analytics as an
 import originals as orig
 from data_loader import CATALOG, DEFAULT_VERSION, NEW_TESTAMENT, load_version
 
-# Webster Bible is the default Bible translation. Set here as well as in data_loader.py so a
-# running deployment that still holds an older copy of data_loader picks it up.
-DEFAULT_VERSION = {**DEFAULT_VERSION, "Bible": "Webster Bible"}
+# Webster Bible / Ali Quli Qarai are the default Bible / Quran translations. Set here as well as
+# in data_loader.py so a running deployment that still holds an older copy of data_loader picks it up.
+DEFAULT_VERSION = {**DEFAULT_VERSION, "Bible": "Webster Bible", "Quran": "Ali Quli Qarai"}
 
 st.set_page_config(page_title="Sacred Words Explorer", page_icon="📜", layout="wide",
                    initial_sidebar_state="expanded")

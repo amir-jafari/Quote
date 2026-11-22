@@ -71,7 +71,7 @@ CATALOG: dict[str, dict] = {
 
 # Default version per scripture used for cross-scripture statistics
 DEFAULT_VERSION = {
-    "Quran": "Saheeh International",
+    "Quran": "Ali Quli Qarai",
     "Bible": "Webster Bible",
     "Torah": "JPS 1917 (Jewish Publication Society)",
 }

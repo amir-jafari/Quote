@@ -39,6 +39,7 @@ LANGS: dict[str, dict] = {
         "default_quran": "Elahi Ghomshei",
         "bible_id": "pesOPV",
         "bible_label": "Persian · Old Version (ترجمه قدیم, 1895)",
+        "bible_short": "Persian Old Version",
         "missing": "No Persian translation for this verse.",
     },
     "Spanish": {
@@ -54,6 +55,7 @@ LANGS: dict[str, dict] = {
         "default_quran": "Julio Cortés",
         "bible_id": "spaRV1909",
         "bible_label": "Spanish · Reina-Valera 1909",
+        "bible_short": "Reina-Valera 1909",
         "missing": "No Spanish translation for this verse.",
     },
 }

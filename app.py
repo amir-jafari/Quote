@@ -16,10 +16,12 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 
 import analytics as an
 import originals as orig
 import companions as comp
+import quote_cards as qc
 from data_loader import CATALOG, DEFAULT_VERSION, NEW_TESTAMENT, load_version
 
 # Webster Bible / Ali Quli Qarai are the default Bible / Quran translations. Set here as well as
@@ -155,8 +157,8 @@ def cached_summary(scripture: str, version: str, section: str, book: str) -> dic
 
 
 @st.cache_data(show_spinner=False)
-def quote_png(text: str, ref: str, style: str) -> bytes:
-    return an.quote_card(text, ref, style)
+def quote_png(blocks: tuple, ref: str, scripture: str, book: str, style: str, sources: str) -> bytes:
+    return qc.quote_card(list(blocks), ref, scripture, book, style, sources)
 
 
 @st.cache_data(show_spinner=False)
@@ -387,6 +389,23 @@ def companions_html(row) -> str:
     return "".join(original_html(companion_for(row, lang)) for lang in active_langs())
 
 
+def card_png(row, style: str = qc.THEMED) -> bytes:
+    """Quote card with the English plus every translation switched on in the sidebar (and the original)."""
+    blocks, sources = [("en", row["text"])], [row["version"]]
+    for lang in active_langs():
+        c = companion_for(row, lang)
+        if c and c.get("text"):
+            blocks.append((c["lang"], c["text"]))
+            meta = comp.LANGS[lang]
+            sources.append(st.session_state.get(f"quran_{meta['code']}", meta["default_quran"])
+                           if row["scripture"] == "Quran" else meta["bible_short"])
+    o = original_for(row)
+    if o and o.get("text"):
+        blocks.append((o["lang"], o["text"]))
+        sources.append("Arabic original" if o["lang"] == "ar" else "Hebrew original")
+    return quote_png(tuple(blocks), row["ref"], row["scripture"], row["book"], style, " · ".join(sources))
+
+
 def text_dir(lang: str) -> str:
     return "ltr" if lang == "es" else "rtl"
 
@@ -445,15 +464,76 @@ def add_fav(row):
         st.toast("Already in your collection")
 
 
+_SHARE_JS = r"""
+<style>
+  html, body { margin: 0; background: transparent; font-family: "Source Sans Pro", "Inter", sans-serif; }
+  button { width: 100%; padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(127,127,127,.35);
+           background: transparent; color: inherit; font: inherit; font-size: 15px; font-weight: 500; cursor: pointer; }
+  button:hover { border-color: #ff4b4b; color: #ff4b4b; }
+  #msg { font-size: 12px; opacity: .8; margin-top: 4px; line-height: 1.3; }
+</style>
+<button id="b">📤 Share</button><div id="msg"></div>
+<script>
+const DATA = "__B64__", NAME = __NAME__, SUBJECT = __SUBJECT__, BODY = __BODY__;
+const msg = t => document.getElementById("msg").textContent = t;
+try { document.body.style.color = getComputedStyle(window.parent.document.querySelector(".stApp") || window.parent.document.body).color; } catch (e) {}
+function blob() {
+  const bin = atob(DATA), a = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
+  return new Blob([a], { type: "image/png" });
+}
+document.getElementById("b").onclick = async () => {
+  const file = new File([blob()], NAME, { type: "image/png" });
+  // 1) The system share sheet (phones, Safari, Edge, Chrome): pick Mail and the card is attached as a picture.
+  //    Streamlit's frame may not share by itself, so the page that holds it is asked first.
+  const navs = [];
+  try { navs.push(window.parent.navigator); } catch (e) {}
+  navs.push(navigator);
+  for (const n of navs) {
+    try {
+      if (n.canShare && n.canShare({ files: [file] })) {
+        await n.share({ files: [file], title: SUBJECT, text: BODY });
+        msg("");
+        return;
+      }
+    } catch (e) { if (e.name === "AbortError") return; }
+  }
+  // 2) No file sharing in this browser: copy the card, then open a new email to paste it into.
+  let copied = false;
+  for (const n of navs.slice().reverse()) {
+    try { await n.clipboard.write([new ClipboardItem({ "image/png": blob() })]); copied = true; break; } catch (e) {}
+  }
+  const mail = "mailto:?subject=" + encodeURIComponent(SUBJECT) + "&body=" + encodeURIComponent(BODY + "\n\n");
+  try { window.parent.location.href = mail; } catch (e) { window.open(mail, "_blank"); }
+  msg(copied ? "Card copied: paste it into the email (Ctrl/⌘+V)." : "Use 🖼️ Quote card to download it, then attach it to the email.");
+};
+</script>
+"""
+
+
+def share_button(png: bytes, row, target=st) -> None:
+    """📤 Share: opens the system share sheet with the card attached (so an email shows the picture);
+    where a browser can't share files, copies the card and opens a new email to paste it into."""
+    import base64
+    import json
+    name = f"{row['ref'].replace(' ', '_').replace(':', '-')}.png"
+    page = (_SHARE_JS.replace("__B64__", base64.b64encode(png).decode())
+            .replace("__NAME__", json.dumps(name))
+            .replace("__SUBJECT__", json.dumps(f"A verse for you: {row['ref']}"))
+            .replace("__BODY__", json.dumps(f"“{row['text']}”\n— {row['ref']} ({row['version']})")))
+    with target:
+        components.html(page, height=78)
+
+
 def verse_actions(row, key: str, card: bool = True):
     row = as_sentence(row)
-    c1, c2, _ = st.columns([1, 1, 3])
+    c1, c2, c3, _ = st.columns([1, 1, 1, 2])
     c1.button("⭐ Save", key=f"fav_{key}", on_click=add_fav, args=(row,), use_container_width=True)
     if card:
-        style = {"Quran": "Emerald", "Bible": "Royal", "Torah": "Gold"}[row["scripture"]]
-        download_link("🖼️ Quote card", quote_png(row["text"], row["ref"], style),
-                      f"{row['ref'].replace(' ', '_').replace(':', '-')}.png", "image/png",
+        png = card_png(row)
+        download_link("🖼️ Quote card", png, f"{row['ref'].replace(' ', '_').replace(':', '-')}.png", "image/png",
                       target=c2, full_width=True)
+        share_button(png, row, c3)
 
 
 def stat_tile(col, value, label):
@@ -1050,13 +1130,16 @@ with tabs[6]:
     if not favs:
         st.info("Nothing saved yet. Use **⭐ Save** on any verse to build your collection.")
     else:
-        style = st.selectbox("Quote-card style", list(an.CARD_STYLES), key="card_style")
+        style = st.selectbox("Quote-card style", qc.STYLES, key="card_style",
+                             help="Scripture theme: a background drawn for each scripture, with its own shade "
+                                  "and pattern for every book.")
         for i, f in enumerate(favs):
             st.markdown(verse_html(f), unsafe_allow_html=True)
-            a, b, _ = st.columns([1, 1, 4])
-            download_link("🖼️ Quote card", quote_png(f["text"], f["ref"], style),
-                          f"{f['ref'].replace(' ', '_').replace(':', '-')}.png", "image/png",
+            a, c, b, _ = st.columns([1, 1, 1, 3])
+            png = card_png(f, style)
+            download_link("🖼️ Quote card", png, f"{f['ref'].replace(' ', '_').replace(':', '-')}.png", "image/png",
                           target=a, full_width=True)
+            share_button(png, f, c)
             if b.button("🗑️ Remove", key=f"rm_{i}", use_container_width=True):
                 favs.pop(i)
                 st.rerun()
@@ -1070,4 +1153,4 @@ with tabs[6]:
         st.write("")
         with st.expander("👀 Preview a quote card"):
             sel = st.selectbox("Verse", range(len(favs)), format_func=lambda j: favs[j]["ref"], key="prev_sel")
-            show_png(quote_png(favs[sel]["text"], favs[sel]["ref"], style), width=420)
+            show_png(card_png(favs[sel], style), width=420)

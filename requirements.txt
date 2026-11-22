@@ -6,3 +6,5 @@ wordcloud>=1.9
 pillow>=10.1
 numpy>=1.26
 requests>=2.31
+arabic-reshaper>=3.0
+python-bidi>=0.4

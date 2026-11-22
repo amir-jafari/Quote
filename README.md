@@ -37,6 +37,21 @@ The sidebar filters cascade **Scripture → Version → Section → Book/Surah**
 - **⚖️ Compare Translations**: one verse in every translation, plus the words they all share.
 - **⭐ My Collection**: save verses, export Markdown/CSV and download shareable **quote-card images**.
 
+## Quote cards
+Cards are 1080 × 1350 (the 4:5 portrait size social feeds show in full). Each card carries the English plus every
+translation switched on in the sidebar (Persian, Spanish, and the Arabic / Hebrew original when that is on), with the
+sources listed under the reference. The default **Scripture theme** background is drawn per scripture and given its
+own shade and pattern for every book: emerald with a gold eight-pointed-star lattice for the Quran, night blue with
+rays of light for the Bible, parchment between scroll rollers for the Torah. The older flat gradients remain in the
+style menu.
+
+**📤 Share** (next to 🖼️ Quote card) opens the device's share sheet with the card attached as a picture: choose Mail
+and the recipient sees the card in the email (or pick WhatsApp, Messages…). Browsers that can't share files, such as
+Firefox on desktop, copy the card instead and open a new email: paste it in with Ctrl/⌘+V.
+
+Fonts (Lora, Cinzel, Vazirmatn, Amiri, Noto Serif Hebrew; SIL Open Font License) are bundled in
+`./fonts`; Persian and Arabic letters are joined with `arabic-reshaper` and ordered with `python-bidi`.
+
 ## Original languages
 With **Show Arabic / Hebrew original** switched on (sidebar, off by default), each verse shows its original text next to the English:
 - **Quran → Arabic** (Uthmani script, tanzil.net).

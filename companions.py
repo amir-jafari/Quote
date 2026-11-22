@@ -36,7 +36,7 @@ LANGS: dict[str, dict] = {
             "Ansarian": "fa.ansarian",
             "Elahi Ghomshei": "fa.ghomshei",
         },
-        "default_quran": "Makarem Shirazi",
+        "default_quran": "Elahi Ghomshei",
         "bible_id": "pesOPV",
         "bible_label": "Persian · Old Version (ترجمه قدیم, 1895)",
         "missing": "No Persian translation for this verse.",

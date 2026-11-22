@@ -292,7 +292,7 @@ def _ref_span(refs: list[tuple[int, int]]) -> str:
 def original_for(row) -> dict | None:
     """Original-language text for a verse (or a joined passage).
     Returns {"text", "lang", "label"}; a dict with only "label" when there is no original to show."""
-    if not st.session_state.get("show_orig", True) or "chapter" not in row:
+    if not st.session_state.get("show_orig", False) or "chapter" not in row:
         return None
     ar, he = originals_data()
     first, last = int(row.get("verse_first", row["verse"])), int(row.get("verse_last", row["verse"]))
@@ -334,7 +334,7 @@ def kjv_from_hebrew():
 
 
 def lang_on(lang: str) -> bool:
-    return st.session_state.get(f"show_{comp.LANGS[lang]['code']}", False)
+    return st.session_state.get(f"show_{comp.LANGS[lang]['code']}", True)
 
 
 def active_langs() -> list[str]:
@@ -503,13 +503,13 @@ with st.sidebar:
     st.markdown(f'<span class="badge" style="--accent:{accent}">{len(scope):,} verses in view</span>',
                 unsafe_allow_html=True)
     st.divider()
-    st.toggle("Show Arabic / Hebrew original", True, key="show_orig",
+    st.toggle("Show Arabic / Hebrew original", False, key="show_orig",
               help="Arabic for the Quran; Hebrew for the Torah and the Old Testament.")
-    if scripture != "Quran" and st.session_state.get("show_orig", True):
+    if scripture != "Quran" and st.session_state.get("show_orig", False):
         st.radio("Hebrew marks", ["Vowels only", "Vowels & cantillation", "Consonants only"], key="heb_marks",
                  help="Cantillation marks are the chanting accents; consonant-only text is how a Torah scroll is written.")
     for lang, meta in comp.LANGS.items():
-        st.toggle(f"Show {lang} translation ({meta['native']})", False, key=f"show_{meta['code']}",
+        st.toggle(f"Show {lang} translation ({meta['native']})", True, key=f"show_{meta['code']}",
                   help=f"Adds the {lang} translation under every verse, in the reader and in Compare Translations. "
                        f"Bible and Torah: {meta['bible_label'].split(' · ')[1]}. Quran: choose the translator below.")
         if lang_on(lang):
@@ -736,7 +736,7 @@ with tabs[1]:
                 f'{html.escape(label)}</div><h3 style="font-family:Cormorant Garamond,serif;margin:.4rem 0 1rem">'
                 f'{html.escape(title)}</h3>{body}</div>')
 
-    if st.session_state.get("show_orig", True) or active_langs():
+    if st.session_state.get("show_orig", False) or active_langs():
         frames = [(version, chap)]
         if parallel != "— none —":
             pdf = get(scripture, parallel)

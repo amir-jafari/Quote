@@ -38,7 +38,7 @@ The sidebar filters cascade **Scripture → Version → Section → Book/Surah**
 - **⭐ My Collection**: save verses, export Markdown/CSV and download shareable **quote-card images**.
 
 ## Original languages
-With **Show Arabic / Hebrew original** switched on (sidebar), each verse shows its original text next to the English:
+With **Show Arabic / Hebrew original** switched on (sidebar, off by default), each verse shows its original text next to the English:
 - **Quran → Arabic** (Uthmani script, tanzil.net).
 - **Torah and Bible Old Testament → Hebrew** (Westminster Leningrad Codex). You can show vowels only, vowels with
   cantillation marks, or consonants only.
@@ -52,10 +52,10 @@ Exodus 20 and Deuteronomy 5) are matched verse by verse. The New Testament (writ
 (Latin Vulgate numbering) show a note instead of Hebrew.
 
 ## Persian & Spanish translations
-Switch on **Show Persian translation** and/or **Show Spanish translation** in the sidebar to add them under every
+Both are on by default (switch them off in the sidebar with **Show Persian translation** / **Show Spanish translation**). They appear under every
 verse card (Inspire, Search, Collection…), as extra columns in the **Read** grid, and in **Compare Translations**.
 Saved verses keep them and the Markdown export includes them.
-- **Quran**: Persian — Makarem Shirazi (default), Fooladvand, Ansarian, Elahi Ghomshei; Spanish — Julio Cortés
+- **Quran**: Persian — Elahi Ghomshei (default), Makarem Shirazi, Fooladvand, Ansarian; Spanish — Julio Cortés
   (default), Raúl González Bórnez, Isa García (tanzil.net). The translator is picked in the sidebar.
 - **Bible & Torah**: Persian Old Version (ترجمه قدیم, 1895) and Spanish Reina-Valera 1909, both public domain
   (eBible.org). They use English verse numbers; JPS 1917 verses are matched through the Hebrew numbering.

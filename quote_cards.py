@@ -1,7 +1,7 @@
 """
 Shareable quote cards (1080 x 1350, the 4:5 portrait size social feeds show in full).
 
-A card carries the English verse plus every extra text that is switched on in the sidebar (Persian, Spanish,
+A card (JPEG) carries the English verse plus every extra text that is switched on in the sidebar (Persian, Spanish,
 Arabic / Hebrew original). The "Scripture theme" background is drawn per scripture and varied per book:
 
   * Quran  -> deep emerald with a gold eight-pointed-star lattice and an ornamental gold frame
@@ -379,6 +379,8 @@ def quote_card(blocks: list[tuple[str, str]], ref: str, scripture: str, book: st
     d.text(((W - mf.getlength(mark)) / 2, H - (118 if scripture == "Torah" and style == THEMED else 95)),
            mark, font=mf, fill=accent)
 
+    # JPEG: a fraction of the PNG size (the parchment grain and light rays compress badly as PNG), so cards
+    # load fast and attach to emails easily. 4:4:4 chroma keeps the small coloured text crisp.
     buf = io.BytesIO()
-    img.save(buf, format="PNG", optimize=True)
+    img.convert("RGB").save(buf, format="JPEG", quality=86, subsampling=0, optimize=True, progressive=True)
     return buf.getvalue()

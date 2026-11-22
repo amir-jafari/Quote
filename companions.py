@@ -38,7 +38,7 @@ LANGS: dict[str, dict] = {
         },
         "default_quran": "Elahi Ghomshei",
         "bible_id": "pesOPV",
-        "bible_label": "Persian · Old Version (ترجمه قدیم, 1895)",
+        "bible_label": "Persian · Old Version (\u2068ترجمه قدیم\u2069, 1895)",  # isolated so it reads in order
         "bible_short": "Persian Old Version",
         "missing": "No Persian translation for this verse.",
     },

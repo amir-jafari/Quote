@@ -28,6 +28,11 @@ from data_loader import CATALOG, DEFAULT_VERSION, NEW_TESTAMENT, load_version
 # in data_loader.py so a running deployment that still holds an older copy of data_loader picks it up.
 DEFAULT_VERSION = {**DEFAULT_VERSION, "Bible": "Webster Bible", "Quran": "Ali Quli Qarai"}
 
+# Full-width buttons: `width="stretch"` on current Streamlit, `use_container_width` on older installs
+import inspect as _inspect
+STRETCH = ({"width": "stretch"} if "width" in _inspect.signature(st.button).parameters
+           else {"use_container_width": True})
+
 st.set_page_config(page_title="Sacred Words Explorer", page_icon="📜", layout="wide",
                    initial_sidebar_state="expanded")
 
@@ -92,6 +97,7 @@ a.dl-btn:hover { border-color: #ff4b4b; color: #ff4b4b !important; }
 .rgrid .orig { margin: 0; padding: 9px 0; border-top: none; font-size: 1.45rem; line-height: 1.9; }
 .rgrid .orig.fa { font-size: 1.1rem; line-height: 1.95; }
 .rgrid .orig.es { font-size: 1.2rem; line-height: 1.6; }
+.rgrid > div.tgt, .reader span.tgt { background: rgba(255, 200, 0, .16); }
 @media (max-width: 760px) { .rgrid { grid-template-columns: 1fr; } .rgrid .head { display: none; } }
 mark { background: rgba(255, 200, 0, .45); padding: 0 2px; border-radius: 4px; color: inherit; }
 .stat { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 14px; padding: 14px 18px; }
@@ -128,7 +134,8 @@ def cached_cloud(texts: tuple, **kw) -> bytes | None:
     if img is None:
         return None
     buf = io.BytesIO()
-    img.convert("RGB").save(buf, format="PNG")
+    # a 256-colour palette looks the same for a word cloud and is about a third of the size
+    img.convert("RGB").quantize(colors=256).save(buf, format="PNG", optimize=True)
     return buf.getvalue()
 
 
@@ -157,7 +164,7 @@ def cached_summary(scripture: str, version: str, section: str, book: str) -> dic
 
 
 @st.cache_data(show_spinner=False)
-def quote_png(blocks: tuple, ref: str, scripture: str, book: str, style: str, sources: str) -> bytes:
+def quote_jpg(blocks: tuple, ref: str, scripture: str, book: str, style: str, sources: str) -> bytes:
     return qc.quote_card(list(blocks), ref, scripture, book, style, sources)
 
 
@@ -165,8 +172,9 @@ def quote_png(blocks: tuple, ref: str, scripture: str, book: str, style: str, so
 def theme_table() -> pd.DataFrame:
     alld = get_defaults()
     rows = []
+    lc = alld["text"].str.lower()  # lowercase once: much faster than 15 case-insensitive scans
     for t in an.THEMES:
-        m = alld["text"].str.contains(an.theme_pattern(t), case=False, regex=True)
+        m = lc.str.contains(an.theme_pattern(t), regex=True)
         for s, g in m.groupby(alld["scripture"]):
             rows.append({"theme": t, "scripture": s, "per1000": g.mean() * 1000})
     return pd.DataFrame(rows)
@@ -221,8 +229,16 @@ def tone_c(scripture: str, version: str, section: str) -> pd.DataFrame:
 
 @st.cache_data(show_spinner=False)
 def length_quantiles() -> pd.DataFrame:
+    """Box-plot statistics per scripture (Tukey whiskers), so the chart doesn't ship ~60,000 raw values."""
     alld = get_defaults()
-    return alld[["scripture", "n_words"]]
+    rows = []
+    for s in SCRIPTURES:
+        x = alld.loc[alld.scripture == s, "n_words"]
+        q1, med, q3 = x.quantile([0.25, 0.5, 0.75])
+        iqr = q3 - q1
+        rows.append({"scripture": s, "q1": q1, "median": med, "q3": q3, "mean": x.mean(),
+                     "lo": x[x >= q1 - 1.5 * iqr].min(), "hi": x[x <= q3 + 1.5 * iqr].max()})
+    return pd.DataFrame(rows)
 
 
 def filter_scope(df: pd.DataFrame, section: str, book: str) -> pd.DataFrame:
@@ -343,10 +359,10 @@ def active_langs() -> list[str]:
     return [lang for lang in comp.LANGS if lang_on(lang)]
 
 
-def companion_for(row, lang: str) -> dict | None:
-    """Persian / Spanish translation of a verse (or a joined passage), when its sidebar toggle is on.
-    Returns {"text", "lang", "label"}; a dict with only "label" when there is nothing to show."""
-    if not lang_on(lang) or "chapter" not in row:
+def companion_for(row, lang: str, force: bool = False) -> dict | None:
+    """Persian / Spanish translation of a verse (or a joined passage), when its sidebar toggle is on (or forced,
+    e.g. when searching in that language). Returns {"text", "lang", "label"}; only "label" when there is none."""
+    if not (force or lang_on(lang)) or "chapter" not in row:
         return None
     meta = comp.LANGS[lang]
     digits = str.maketrans("0123456789", meta["digits"])
@@ -385,11 +401,40 @@ def companion_for(row, lang: str) -> dict | None:
     return {"text": text, "lang": meta["code"], "label": label}
 
 
-def companions_html(row) -> str:
-    return "".join(original_html(companion_for(row, lang)) for lang in active_langs())
+@st.cache_resource(show_spinner=False)
+def from_hebrew(scripture: str, version: str):
+    """(book, Hebrew chapter, Hebrew verse) -> that version's (chapter, verse) list."""
+    return comp.hebrew_to_kjv(heb_map(scripture, version))
 
 
-def card_png(row, style: str = qc.THEMED) -> bytes:
+def numbering(scripture: str, version: str) -> str:
+    if scripture == "Quran":
+        return "quran"
+    code = orig.source_code(scripture, version)
+    return "hebrew" if code in orig.HEBREW_NUMBERED else "vulgate" if code in orig.NO_HEBREW else "english"
+
+
+def aligned_refs(scripture: str, src: str, dst: str, book: str, chapter: int, verse: int) -> list[tuple[int, int]]:
+    """Where verse `chapter:verse` of version `src` is in version `dst`. JPS 1917 uses the Hebrew numbering and the
+    English Bibles the English one (e.g. JPS Genesis 32:1 = KJV Genesis 31:55), so they are matched through the
+    Hebrew text. Douay-Rheims (Vulgate numbering) has no mapping and keeps the same numbers."""
+    a, b = numbering(scripture, src), numbering(scripture, dst)
+    if a == b or "vulgate" in (a, b):
+        return [(chapter, verse)]
+    back = from_hebrew(scripture, dst)
+    refs = [r for h in heb_map(scripture, src).get((book, chapter, verse), []) for r in back.get((book, *h), [])]
+    return list(dict.fromkeys(refs)) or [(chapter, verse)]
+
+
+def companions_html(row, patterns: dict | None = None) -> str:
+    """The active translations under a verse; `patterns` ({lang: regex}) also shows and highlights a language
+    that is searched in even when its toggle is off."""
+    patterns = patterns or {}
+    langs = active_langs() + [lang for lang in patterns if lang not in active_langs()]
+    return "".join(original_html(companion_for(row, lang, force=True), patterns.get(lang)) for lang in langs)
+
+
+def card_jpg(row, style: str = qc.THEMED) -> bytes:
     """Quote card with the English plus every translation switched on in the sidebar (and the original)."""
     blocks, sources = [("en", row["text"])], [row["version"]]
     for lang in active_langs():
@@ -403,18 +448,18 @@ def card_png(row, style: str = qc.THEMED) -> bytes:
     if o and o.get("text"):
         blocks.append((o["lang"], o["text"]))
         sources.append("Arabic original" if o["lang"] == "ar" else "Hebrew original")
-    return quote_png(tuple(blocks), row["ref"], row["scripture"], row["book"], style, " · ".join(sources))
+    return quote_jpg(tuple(blocks), row["ref"], row["scripture"], row["book"], style, " · ".join(sources))
 
 
 def text_dir(lang: str) -> str:
     return "ltr" if lang == "es" else "rtl"
 
 
-def original_html(o: dict | None) -> str:
+def original_html(o: dict | None, pattern: str | None = None) -> str:
     if not o:
         return ""
     body = (f'<div class="orig {o["lang"]}" lang="{o["lang"]}" dir="{text_dir(o["lang"])}">'
-            f'{html.escape(o["text"])}</div>' if o.get("text") else "")
+            f'{highlight(o["text"], pattern)}</div>' if o.get("text") else "")
     return body + f'<div class="olabel {o.get("lang", "")}">{html.escape(o["label"])}</div>'
 
 
@@ -432,7 +477,7 @@ def as_sentence(row) -> dict:
 
 
 def verse_html(row, big: bool = False, pattern: str | None = None, show_version: bool = True,
-               with_original: bool = True) -> str:
+               with_original: bool = True, comp_patterns: dict | None = None) -> str:
     color = COLORS[row["scripture"]]
     icon = CATALOG[row["scripture"]]["icon"]
     meta = f"{row['version']} · {row['section']}" if show_version else row["section"]
@@ -444,7 +489,7 @@ def verse_html(row, big: bool = False, pattern: str | None = None, show_version:
             f'<div class="txt">{highlight(row["text"], pattern)}</div>'
             f'<div class="ref">{icon} {html.escape(row["ref"])}</div>'
             f'<div class="meta">{html.escape(meta)}</div>'
-            + (companions_html(row) + original_html(original_for(row)) if with_original else "")
+            + (companions_html(row, comp_patterns) + original_html(original_for(row)) if with_original else "")
             + "</div>")
 
 
@@ -464,33 +509,50 @@ def add_fav(row):
         st.toast("Already in your collection")
 
 
-_SHARE_JS = r"""
+_CARD_JS = r"""
 <style>
   html, body { margin: 0; background: transparent; font-family: "Source Sans Pro", "Inter", sans-serif; }
-  button { width: 100%; padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(127,127,127,.35);
+  img { display: block; width: 100%; max-width: 380px; aspect-ratio: 1080 / 1350; border-radius: 12px;
+        box-shadow: 0 6px 22px rgba(0,0,0,.22); }
+  body { padding: 2px 4px 14px; }
+  .row { display: flex; gap: 8px; max-width: 380px; margin-top: 10px; }
+  button { flex: 1; padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(127,127,127,.35);
            background: transparent; color: inherit; font: inherit; font-size: 15px; font-weight: 500; cursor: pointer; }
   button:hover { border-color: #ff4b4b; color: #ff4b4b; }
-  #msg { font-size: 12px; opacity: .8; margin-top: 4px; line-height: 1.3; }
+  #msg { font-size: 12.5px; opacity: .85; margin-top: 6px; line-height: 1.35; max-width: 380px; }
 </style>
-<button id="b">📤 Share</button><div id="msg"></div>
+<img id="card" alt="Quote card">
+<div class="row"><button id="dl">⬇️ Download</button><button id="sh">📤 Share</button></div>
+<div id="msg"></div>
 <script>
-const DATA = "__B64__", NAME = __NAME__, SUBJECT = __SUBJECT__, BODY = __BODY__;
+const DATA = "__B64__", NAME = __NAME__, SUBJECT = __SUBJECT__, BODY = __BODY__, TYPE = "image/jpeg";
 const msg = t => document.getElementById("msg").textContent = t;
-try { document.body.style.color = getComputedStyle(window.parent.document.querySelector(".stApp") || window.parent.document.body).color; } catch (e) {}
-function blob() {
-  const bin = atob(DATA), a = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
-  return new Blob([a], { type: "image/png" });
-}
-document.getElementById("b").onclick = async () => {
-  const file = new File([blob()], NAME, { type: "image/png" });
-  // 1) The system share sheet (phones, Safari, Edge, Chrome): pick Mail and the card is attached as a picture.
-  //    Streamlit's frame may not share by itself, so the page that holds it is asked first.
-  const navs = [];
-  try { navs.push(window.parent.navigator); } catch (e) {}
-  navs.push(navigator);
-  for (const n of navs) {
+let P = window; try { void window.parent.document; P = window.parent; } catch (e) {}   // the Streamlit page
+try { document.body.style.color = getComputedStyle(P.document.querySelector(".stApp") || P.document.body).color; } catch (e) {}
+const bin = atob(DATA), bytes = new Uint8Array(bin.length);
+for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+const img = document.getElementById("card");
+img.src = URL.createObjectURL(new Blob([bytes], { type: TYPE }));
+
+// Download through the page itself, so it works whatever the embedding frame allows
+document.getElementById("dl").onclick = () => {
+  const blob = new P.Blob([bytes], { type: TYPE }), url = P.URL.createObjectURL(blob);
+  const a = P.document.createElement("a");
+  a.href = url; a.download = NAME; P.document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => P.URL.revokeObjectURL(url), 5000);
+};
+
+// Clipboards only take PNG, so the card is redrawn as PNG for the copy fallback
+const asPng = () => new Promise(res => {
+  const c = document.createElement("canvas"); c.width = img.naturalWidth; c.height = img.naturalHeight;
+  c.getContext("2d").drawImage(img, 0, 0); c.toBlob(res, "image/png");
+});
+
+document.getElementById("sh").onclick = async () => {
+  // 1) The system share sheet (phones, Safari, Edge, Chrome): choose Mail and the card is attached as a picture.
+  for (const n of [P.navigator, navigator]) {
     try {
+      const file = new File([bytes], NAME, { type: TYPE });
       if (n.canShare && n.canShare({ files: [file] })) {
         await n.share({ files: [file], title: SUBJECT, text: BODY });
         msg("");
@@ -500,40 +562,60 @@ document.getElementById("b").onclick = async () => {
   }
   // 2) No file sharing in this browser: copy the card, then open a new email to paste it into.
   let copied = false;
-  for (const n of navs.slice().reverse()) {
-    try { await n.clipboard.write([new ClipboardItem({ "image/png": blob() })]); copied = true; break; } catch (e) {}
+  for (const n of [navigator, P.navigator]) {
+    try { await n.clipboard.write([new ClipboardItem({ "image/png": asPng() })]); copied = true; break; } catch (e) {}
   }
   const mail = "mailto:?subject=" + encodeURIComponent(SUBJECT) + "&body=" + encodeURIComponent(BODY + "\n\n");
-  try { window.parent.location.href = mail; } catch (e) { window.open(mail, "_blank"); }
-  msg(copied ? "Card copied: paste it into the email (Ctrl/⌘+V)." : "Use 🖼️ Quote card to download it, then attach it to the email.");
+  // Streamlit's frame may not navigate the page, so the mail link is clicked from inside the page itself
+  try {
+    const a = P.document.createElement("a");
+    a.href = mail; P.document.body.appendChild(a); a.click(); a.remove();
+  } catch (e) { window.open(mail, "_blank"); }
+  msg(copied ? "Card copied: paste it into the email (Ctrl/⌘+V)." : "Download the card, then attach it to the email.");
 };
 </script>
 """
 
 
-def share_button(png: bytes, row, target=st) -> None:
-    """📤 Share: opens the system share sheet with the card attached (so an email shows the picture);
-    where a browser can't share files, copies the card and opens a new email to paste it into."""
+def card_panel(row, style: str = qc.THEMED) -> None:
+    """Preview of the quote card with ⬇️ Download and 📤 Share. The image is embedded once and made only when
+    asked for. Share opens the system share sheet with the card attached (an email shows the picture); where a
+    browser can't share files it copies the card and opens a new email to paste it into."""
     import base64
     import json
-    name = f"{row['ref'].replace(' ', '_').replace(':', '-')}.png"
-    page = (_SHARE_JS.replace("__B64__", base64.b64encode(png).decode())
-            .replace("__NAME__", json.dumps(name))
-            .replace("__SUBJECT__", json.dumps(f"A verse for you: {row['ref']}"))
-            .replace("__BODY__", json.dumps(f"“{row['text']}”\n— {row['ref']} ({row['version']})")))
-    with target:
-        components.html(page, height=78)
+
+    def js(v: str) -> str:  # a JS string literal that can't close the <script> element
+        return json.dumps(v).replace("</", "<\\/")
+
+    page = (_CARD_JS.replace("__B64__", base64.b64encode(card_jpg(row, style)).decode())
+            .replace("__NAME__", js(f"{row['ref'].replace(' ', '_').replace(':', '-')}.jpg"))
+            .replace("__SUBJECT__", js(f"A verse for you: {row['ref']}"))
+            .replace("__BODY__", js(f"“{row['text']}”\n— {row['ref']} ({row['version']})")))
+    if hasattr(st, "iframe"):  # Streamlit ≥ 1.5x: sizes itself to the content
+        st.iframe(page, height="content")
+    else:
+        components.html(page, height=600)
+
+
+def _flip(key: str) -> None:
+    st.session_state[key] = not st.session_state.get(key, False)
+
+
+def card_toggle(key: str, target=st) -> bool:
+    """🖼️ Quote card button that opens / closes the card panel; returns whether it is open."""
+    k = f"card_open_{key}"
+    target.button("🖼️ Hide card" if st.session_state.get(k) else "🖼️ Quote card", key=f"cardbtn_{key}",
+                  on_click=_flip, args=(k,), **STRETCH,
+                  help="Make a shareable picture of this verse with the translations that are switched on.")
+    return st.session_state.get(k, False)
 
 
 def verse_actions(row, key: str, card: bool = True):
     row = as_sentence(row)
-    c1, c2, c3, _ = st.columns([1, 1, 1, 2])
-    c1.button("⭐ Save", key=f"fav_{key}", on_click=add_fav, args=(row,), use_container_width=True)
-    if card:
-        png = card_png(row)
-        download_link("🖼️ Quote card", png, f"{row['ref'].replace(' ', '_').replace(':', '-')}.png", "image/png",
-                      target=c2, full_width=True)
-        share_button(png, row, c3)
+    c1, c2, _ = st.columns([1, 1, 3])
+    c1.button("⭐ Save", key=f"fav_{key}", on_click=add_fav, args=(row,), **STRETCH)
+    if card and card_toggle(key, c2):
+        card_panel(row)
 
 
 def stat_tile(col, value, label):
@@ -559,6 +641,171 @@ def guard(key: str, options) -> None:
 def parse_words(raw: str) -> list[str]:
     words = [w.strip().lower() for w in re.split(r"[,;\n]", raw) if w.strip()]
     return list(dict.fromkeys(words))[:MAX_WORDS]
+
+
+@st.cache_data(show_spinner=False)
+def chapter_map(scripture: str, version: str) -> dict[str, list[int]]:
+    d = get(scripture, version)
+    return {b: sorted(int(c) for c in g.unique()) for b, g in d.groupby("book")["chapter"]}
+
+
+def read_step(delta: int, rbooks: list[str], chmap: dict) -> None:
+    """◀ / ▶ in the reader: next or previous chapter, moving on to the next / previous book at the ends."""
+    b = st.session_state.get("read_book", rbooks[0])
+    chs = chmap[b]
+    cur = st.session_state.get("read_ch", chs[0])
+    j = (chs.index(cur) if cur in chs else 0) + delta
+    if 0 <= j < len(chs):
+        st.session_state.read_ch = chs[j]
+    else:
+        i = rbooks.index(b) + delta
+        if 0 <= i < len(rbooks):
+            st.session_state.read_book = rbooks[i]
+            st.session_state.read_ch = chmap[rbooks[i]][0 if delta > 0 else -1]
+    st.session_state.pop("read_target", None)
+    st.session_state.pop("read_msg", None)
+
+
+_BOOK_ALIASES = {"songofsongs": "songofsolomon", "canticles": "songofsolomon", "revelation": "revelationofjohn",
+                 "revelations": "revelationofjohn", "qoheleth": "ecclesiastes", "psalm": "psalms"}
+
+
+def _norm_name(name: str) -> str:
+    n = name.lower().strip()
+    n = re.sub(r"^(iii|3)\s*(?=[a-z])", "3", n)
+    n = re.sub(r"^(ii|2)\s*(?=[a-z])", "2", n)
+    n = re.sub(r"^(i|1)\s+(?=[a-z])", "1", n)
+    n = re.sub(r"^1(?=[a-z])", "1", n)
+    n = re.sub(r"[^a-z0-9]", "", n)
+    return _BOOK_ALIASES.get(n, n)
+
+
+def find_book(name: str, books: list[str], scripture: str) -> str | None:
+    q = _norm_name(name)
+    if not q:
+        return None
+    if scripture == "Quran":
+        keyed = {b: re.sub(r"[^a-z]", "", re.sub(r"^\d+\.\s*", "", b.lower())) for b in books}
+        q = q.rstrip("h")  # Baqarah / Baqara
+        for test in (lambda k: k.startswith(q), lambda k: re.sub(r"^a[lnrstdz]", "", k).startswith(q),
+                     lambda k: q in k):
+            hits = [b for b, k in keyed.items() if test(k)]
+            if hits:
+                return hits[0]
+        return None
+    keyed = {b: _norm_name(b) for b in books}
+    for test in (lambda k: k == q, lambda k: k.startswith(q), lambda k: q in k):
+        hits = [b for b, k in keyed.items() if test(k)]
+        if hits:
+            return hits[0]
+    return None
+
+
+def go_to_ref(scripture: str, version: str, rbooks: list[str]) -> None:
+    """Parse the reader's "Go to a verse" box (John 3:16, Psalm 23, 1 Cor 13:4, 2:255, Al-Baqara 255)."""
+    raw = st.session_state.get("read_goto", "").strip()
+    st.session_state.pop("read_msg", None)
+    if not raw:
+        return
+    m = re.match(r"^(.*?)\s*(\d+)(?:\s*[:.,]\s*(\d+))?\s*$", raw)
+    if not m:
+        st.session_state.read_msg = f"Couldn't read “{raw}”. Try e.g. John 3:16."
+        return
+    name, n1, n2 = m.group(1).strip(), int(m.group(2)), int(m.group(3)) if m.group(3) else None
+    if name.lower() in ("quran", "qur'an", "koran", "surah", "sura"):
+        name = ""
+    chmap = chapter_map(scripture, version)
+    allbooks = list(chmap)
+    d = get(scripture, version)
+    if scripture == "Quran":
+        if name:
+            bk, verse = find_book(name, allbooks, scripture), (n2 if n2 else n1)
+        else:
+            hits = d.loc[d["chapter"] == n1, "book"]
+            bk, verse = (hits.iloc[0] if len(hits) else None), n2
+        ch = chmap[bk][0] if bk else None
+    else:
+        bk = find_book(name, allbooks, scripture) if name else None
+        ch, verse = n1, n2
+    if not bk:
+        st.session_state.read_msg = f"No {CATALOG[scripture]['unit'].lower()} matches “{name or raw}” in the {scripture}."
+        return
+    if bk not in rbooks:
+        st.session_state.read_msg = f"{bk} isn't in the selected section. Choose “All sections” in the sidebar."
+        return
+    if ch not in chmap[bk]:
+        st.session_state.read_msg = f"{bk} has chapters 1–{chmap[bk][-1]}."
+        return
+    if verse is not None and not ((d["book"] == bk) & (d["chapter"] == ch) & (d["verse"] == verse)).any():
+        st.session_state.read_msg = f"{bk} {'' if scripture == 'Quran' else f'{ch}:'}{verse} isn't in {version}."
+        verse = None
+    st.session_state.read_book = bk
+    st.session_state.read_ch = ch
+    st.session_state.read_target = ((bk, ch), verse) if verse else None
+
+
+def quran_choice(lang: str) -> str:
+    meta = comp.LANGS[lang]
+    return st.session_state.get(f"quran_{meta['code']}", meta["default_quran"])
+
+
+@st.cache_data(show_spinner="Preparing the translation…")
+def comp_series(scripture: str, version: str, lang: str, quran_name: str) -> pd.Series:
+    """The Persian / Spanish text for every verse of a version, aligned with get(scripture, version)."""
+    d = get(scripture, version)
+    if scripture == "Quran":
+        tr = companion_quran(lang, quran_name)
+        vals = [tr.get((c, v), "") for c, v in zip(d["chapter"], d["verse"])]
+    else:
+        code = orig.source_code(scripture, version)
+        bible = companion_bible(lang)
+        if code in comp.NO_PAIRING:
+            vals = [""] * len(d)
+        elif code in comp.HEBREW_NUMBERED:
+            heb, back = heb_map(scripture, version), kjv_from_hebrew()
+            vals = []
+            for b, c, v in zip(d["book"], d["chapter"], d["verse"]):
+                refs = list(dict.fromkeys(k for h in heb.get((b, c, v), []) for k in back.get((b, *h), []))) or [(c, v)]
+                vals.append(" ".join(bible.get((b, *r), "") for r in refs).strip())
+        else:
+            vals = [bible.get((b, c, v), "") for b, c, v in zip(d["book"], d["chapter"], d["verse"])]
+    return pd.Series(vals, index=d.index)
+
+
+# Search in Persian and Spanish: letters that are written several ways match each other
+_ES_CLASS = {"a": "aáàâä", "e": "eéèêë", "i": "iíìîï", "o": "oóòôö", "u": "uúùûü", "n": "nñ", "c": "cç"}
+_FA_CLASS = {"ی": "یيى", "ي": "یيى", "ى": "یيى", "ک": "کك", "ك": "کك", "ه": "هةۀ", "ة": "هة", "ۀ": "ۀهة",
+             "ا": "اآأإ", "آ": "آا", "و": "وؤ"}
+_FA_MARKS = "ً-ٰٟ‌‍"
+
+
+def search_pattern(q: str, lang: str, mode: str) -> str:
+    q = q.strip()
+    if lang == "English":
+        if mode == "Anywhere in text":
+            return re.escape(q).replace(r"\ ", r"\s+")
+        return an.word_pattern(q, mode == "Word & its forms")
+    import unicodedata
+    if lang == "Spanish":
+        plain = "".join(ch for ch in unicodedata.normalize("NFD", q.lower()) if unicodedata.category(ch) != "Mn")
+        body = "".join(r"\s+" if ch.isspace() else f"[{_ES_CLASS[ch]}]" if ch in _ES_CLASS else re.escape(ch)
+                       for ch in plain)
+        body = re.sub(r"(\\s\+)+", r"\\s+", body)
+        if mode == "Exact word":
+            return rf"(?<!\w){body}(?!\w)"
+        return rf"(?<!\w){body}" if mode == "Word & its forms" else body
+    # Persian: ignore vowel marks and zero-width joiners, in the query and between the letters of the text
+    plain = re.sub(f"[{_FA_MARKS}]", "", q)
+    parts = []
+    for ch in plain:
+        if ch.isspace():
+            parts.append(r"[\s‌]+")
+        else:
+            parts.append((f"[{_FA_CLASS[ch]}]" if ch in _FA_CLASS else re.escape(ch)) + f"[{_FA_MARKS}]*")
+    body = re.sub(r"(\[\\s\\u200c\]\+)+", r"[\\s\\u200c]+", "".join(parts))
+    if mode == "Exact word":
+        return rf"(?<!\w){body}(?![\w‌])"
+    return rf"(?<!\w){body}" if mode == "Word & its forms" else body
 
 
 # --------------------------------------------------------------------------------------
@@ -621,7 +868,7 @@ n_versions = sum(len(CATALOG[s]["versions"]) for s in SCRIPTURES)
 st.markdown(f"""
 <div class="hero">
   <h1>Sacred Words Explorer</h1>
-  <p>Discover, read, compare and visualise the words of the Quran, the Bible and the Torah — all in English.</p>
+  <p>Discover, read, compare and visualise the words of the Quran, the Bible and the Torah — in English, Persian and Spanish.</p>
   <div class="chips"><span>☪️ Quran</span><span>✝️ Bible</span><span>✡️ Torah</span>
   <span>📚 {n_versions} translations</span><span>📖 {tot_verses:,} verses</span></div>
 </div>""", unsafe_allow_html=True)
@@ -652,8 +899,8 @@ with tabs[0]:
     source = c2.selectbox("Draw from", ["Current selection", "Any scripture"], key="insp_src")
     c3.write("")
     b1, b2 = c3.columns(2)
-    draw = b1.button("✨ Inspire me", type="primary", use_container_width=True)
-    daily = b2.button("📅 Verse of the day", use_container_width=True)
+    draw = b1.button("✨ Inspire me", type="primary", **STRETCH)
+    daily = b2.button("📅 Verse of the day", **STRETCH)
 
     if source == "Any scripture":
         pool = pd.concat([nice_pool(s, matched_version(s)) for s in SCRIPTURES])
@@ -757,18 +1004,37 @@ with tabs[0]:
 # ======================================================================================
 with tabs[1]:
     st.subheader(f"Read the {scripture}")
-    r1, r2, r3, r4 = st.columns([3, 1, 3, 2])
     rbooks = list(dict.fromkeys(books_df.sort_values("book_num")["book"]))
+    chmap = chapter_map(scripture, version)
+    # Follow the sidebar's book when it changes; otherwise keep the reader where it is
+    if st.session_state.get("read_sync") != (scripture, section, book):
+        st.session_state.read_sync = (scripture, section, book)
+        st.session_state.read_book = book if book in rbooks else rbooks[0]
+        st.session_state.pop("read_ch", None)
+        st.session_state.pop("read_target", None)
     guard("read_book", rbooks)
-    rbook = r1.selectbox(unit, rbooks, index=rbooks.index(book) if book in rbooks else 0, key="read_book")
+    st.session_state.setdefault("read_book", rbooks[0])
+
+    g1, g2 = st.columns([3, 4])
+    g1.text_input("🔎 Go to a verse", key="read_goto", on_change=go_to_ref, args=(scripture, version, rbooks),
+                  placeholder="e.g. 2:255 or Al-Baqara 255" if scripture == "Quran" else "e.g. John 3:16 or Psalm 23",
+                  help="Type a reference and press Enter. Book names can be shortened (Gen 1:1, 1 Cor 13).")
+    if st.session_state.get("read_msg"):
+        g2.write("")
+        g2.warning(st.session_state.read_msg)
+
+    r1, r2, r3, r4 = st.columns([3, 1, 3, 2])
+    rbook = r1.selectbox(unit, rbooks, key="read_book", on_change=lambda: (st.session_state.pop("read_ch", None),
+                                                                          st.session_state.pop("read_target", None)))
     bdf = df[df["book"] == rbook]
-    chapters = [int(c) for c in sorted(bdf["chapter"].unique())]
+    chapters = chmap[rbook]
     guard("read_ch", chapters)
     if scripture == "Quran":
         rch = chapters[0]
         r2.metric("Verses", len(bdf))
     else:
-        rch = r2.selectbox("Chapter", chapters, key="read_ch")
+        rch = r2.selectbox("Chapter", chapters, key="read_ch",
+                           on_change=lambda: st.session_state.pop("read_target", None))
     others = ["— none —"] + [v for v in versions if v != version]
     parallel = r3.selectbox("Side-by-side with", others, key="read_par")
     hl = r4.text_input("Highlight word", key="read_hl", placeholder="e.g. light")
@@ -776,12 +1042,35 @@ with tabs[1]:
 
     chap = bdf[bdf["chapter"] == rch].sort_values("verse")
     title = rbook if scripture == "Quran" else f"{rbook} {rch}"
+    target = st.session_state.get("read_target")
+    target = target[1] if target and target[0] == (rbook, rch) else None
+
+    def nav(where: str):
+        i, j = rbooks.index(rbook), chapters.index(rch)
+        has_prev = j > 0 or i > 0
+        has_next = j < len(chapters) - 1 or i < len(rbooks) - 1
+        step = "surah" if scripture == "Quran" else "chapter"
+        n1, _, n2 = st.columns([1, 3, 1])
+        n1.button(f"◀ Previous {step}", key=f"prev_{where}", on_click=read_step, args=(-1, rbooks, chmap),
+                  disabled=not has_prev, **STRETCH)
+        n2.button(f"Next {step} ▶", key=f"next_{where}", on_click=read_step, args=(1, rbooks, chmap),
+                  disabled=not has_next, **STRETCH)
 
     def reader_grid(frames: list[tuple[str, pd.DataFrame]]) -> str:
-        """Verse-by-verse grid: one column per English version plus the Persian and the original language."""
+        """Verse-by-verse grid: the chosen version, an optional second version (matched verse by verse, also where
+        the two number verses differently), the active translations and the original language."""
         base = frames[0][1]
-        others = [f.set_index("verse")["text"] for _, f in frames[1:]]
         recs = base.to_dict("records")
+        par = None
+        if len(frames) > 1:
+            pname, pbook = frames[1]
+            ptext = {(c, v): t for c, v, t in zip(pbook["chapter"], pbook["verse"], pbook["text"])}
+            par = []
+            for r in recs:
+                refs = aligned_refs(scripture, version, pname, rbook, r["chapter"], r["verse"])
+                txt = " ".join(ptext.get(x, "") for x in refs).strip()
+                num = str(r["verse"]) if refs == [(r["chapter"], r["verse"])] else _ref_span(refs)
+                par.append((num, txt))
         origs = [original_for(r) for r in recs]
         comps = {lang: [companion_for(r, lang) for r in recs] for lang in active_langs()}
         comps = {k: v for k, v in comps.items() if any(c and c.get("text") for c in v)}
@@ -791,19 +1080,24 @@ with tabs[1]:
                  + (["Arabic original" if lang == "ar" else "Hebrew original"] if has_orig else []))
         cells = "".join(f'<div class="head">{html.escape(h)}</div>' for h in heads)
 
-        def rtl_cell(o):
-            return (f'<div class="orig {o["lang"]}" lang="{o["lang"]}" dir="{text_dir(o["lang"])}">'
-                    f'{html.escape(o["text"])}</div>' if o and o.get("text") else "<div></div>")
+        def rtl_cell(o, cls):
+            return (f'<div class="orig {o["lang"]}{cls}" lang="{o["lang"]}" dir="{text_dir(o["lang"])}">'
+                    f'{html.escape(o["text"])}</div>' if o and o.get("text") else f'<div class="{cls}"></div>')
 
-        for i, ((_, r), o) in enumerate(zip(base.iterrows(), origs)):
-            cells += f'<div><sup>{r.verse}</sup>{highlight(r.text, pat)}</div>'
-            for s_ in others:
-                cells += f'<div><sup>{r.verse}</sup>{highlight(s_.get(r.verse, ""), pat)}</div>'
+        for i, (r, o) in enumerate(zip(recs, origs)):
+            cls = " tgt" if r["verse"] == target else ""
+            cells += f'<div class="{cls}"><sup>{r["verse"]}</sup>{highlight(r["text"], pat)}</div>'
+            if par is not None:
+                cells += f'<div class="{cls}"><sup>{par[i][0]}</sup>{highlight(par[i][1], pat)}</div>'
             for cs in comps.values():
-                cells += rtl_cell(cs[i])
+                cells += rtl_cell(cs[i], cls)
             if has_orig:
-                cells += rtl_cell(o)
-        note = " · ".join(dict.fromkeys(x["label"] for x in origs + [c for cs in comps.values() for c in cs] if x and not x.get("text")))
+                cells += rtl_cell(o, cls)
+        note = " · ".join(dict.fromkeys(x["label"] for x in origs + [c for cs in comps.values() for c in cs]
+                                        if x and not x.get("text")))
+        if par is not None and any(num != str(r["verse"]) for (num, _), r in zip(par, recs)):
+            note = ((note + " · ") if note else "") + (f"{frames[1][0]} numbers some of these verses differently; "
+                                                       "its own numbers are shown.")
         return (f'<div class="reader" style="--accent:{accent}"><h3 style="font-family:Cormorant Garamond,serif;'
                 f'margin:.2rem 0 .8rem">{html.escape(title)}</h3>'
                 f'<div class="rgrid" style="--cols:{len(heads)}">{cells}</div>'
@@ -811,30 +1105,30 @@ with tabs[1]:
                 + "</div>")
 
     def reader(frame, label):
-        body = " ".join(f"<sup>{v}</sup>{highlight(t, pat)}" for v, t in zip(frame.verse, frame.text))
+        body = " ".join((f'<span class="tgt">' if v == target else "<span>") + f"<sup>{v}</sup>{highlight(t, pat)}</span>"
+                        for v, t in zip(frame.verse, frame.text))
         return (f'<div class="reader" style="--accent:{accent}"><div class="badge" style="--accent:{accent}">'
                 f'{html.escape(label)}</div><h3 style="font-family:Cormorant Garamond,serif;margin:.4rem 0 1rem">'
                 f'{html.escape(title)}</h3>{body}</div>')
 
-    if st.session_state.get("show_orig", False) or active_langs():
+    nav("top")
+    if st.session_state.get("show_orig", False) or active_langs() or parallel != "— none —":
         frames = [(version, chap)]
         if parallel != "— none —":
             pdf = get(scripture, parallel)
-            frames.append((parallel, pdf[(pdf["book"] == rbook) & (pdf["chapter"] == rch)].sort_values("verse")))
+            frames.append((parallel, pdf[pdf["book"] == rbook]))
         st.markdown(reader_grid(frames), unsafe_allow_html=True)
-    elif parallel == "— none —":
-        st.markdown(reader(chap, version), unsafe_allow_html=True)
     else:
-        pdf = get(scripture, parallel)
-        pchap = pdf[(pdf["book"] == rbook) & (pdf["chapter"] == rch)].sort_values("verse")
-        a, b = st.columns(2)
-        a.markdown(reader(chap, version), unsafe_allow_html=True)
-        b.markdown(reader(pchap, parallel), unsafe_allow_html=True)
+        st.markdown(reader(chap, version), unsafe_allow_html=True)
+    nav("bottom")
 
-    st.write("")
-    with st.expander("⭐ Save a verse from this chapter"):
-        guard("read_vsel", chap["verse"].tolist())
-        vnum = st.selectbox("Verse", chap["verse"].tolist(), key="read_vsel")
+    with st.expander("⭐ Save or share a verse from this chapter", expanded=target is not None):
+        vlist = chap["verse"].tolist()
+        guard("read_vsel", vlist)
+        if target in vlist and st.session_state.get("read_vsel_for") != (rbook, rch, target):
+            st.session_state.read_vsel_for = (rbook, rch, target)
+            st.session_state.read_vsel = target
+        vnum = st.selectbox("Verse", vlist, key="read_vsel")
         vrow = as_sentence(chap[chap["verse"] == vnum].iloc[0])
         st.markdown(verse_html(vrow), unsafe_allow_html=True)
         verse_actions(vrow, "read")
@@ -844,23 +1138,34 @@ with tabs[1]:
 # ======================================================================================
 with tabs[2]:
     st.subheader("Search the scriptures")
-    s1, s2, s3 = st.columns([4, 2, 2])
-    q = s1.text_input("Word or phrase", placeholder="e.g. light upon light, patience, the good shepherd",
-                      key="q")
+    s1, s0, s2, s3 = st.columns([4, 2, 2, 2])
+    qlang = s0.selectbox("Language", ["English"] + list(comp.LANGS), key="q_lang",
+                         format_func=lambda l: l if l == "English" else f"{l} ({comp.LANGS[l]['native']})",
+                         help="Search the English text or the Persian / Spanish translation. Persian matches "
+                              "ي/ی and ك/ک alike and ignores vowel marks; Spanish ignores accents (senor finds Señor).")
+    placeholder = {"English": "e.g. light upon light, patience, the good shepherd",
+                   "Persian": "مثلاً: رحمت، نور، صبر", "Spanish": "p. ej.: misericordia, luz, paciencia"}[qlang]
+    q = s1.text_input("Word or phrase", placeholder=placeholder, key="q")
     where = s2.selectbox("Where", ["Current selection", "All three scriptures"], key="q_where")
     mode = s3.selectbox("Match", ["Word & its forms", "Exact word", "Anywhere in text"], key="q_mode")
     whole = st.toggle("Show full sentences (join verses that continue into the next one)", True, key="q_whole")
     if q.strip():
-        if mode == "Anywhere in text":
-            qpat = re.escape(q.strip()).replace(r"\ ", r"\s+")
-        else:
-            qpat = an.word_pattern(q, mode == "Word & its forms")
-        base = get_defaults() if where == "All three scriptures" else scope
-        hits = base[base["text"].str.contains(qpat, case=False, regex=True)]
+        qpat = search_pattern(q, qlang, mode)
+        # (scripture, version, verses) to search: the current selection, or each scripture in its default version
+        parts = ([(s_, DEFAULT_VERSION[s_], get(s_, DEFAULT_VERSION[s_])) for s_ in SCRIPTURES]
+                 if where == "All three scriptures" else [(scripture, version, scope)])
+        hit_parts, n_base = [], 0
+        for s_, v_, d_ in parts:
+            n_base += len(d_)
+            col = d_["text"] if qlang == "English" else comp_series(s_, v_, qlang, quran_choice(qlang)).loc[d_.index]
+            hit_parts.append(d_[col.str.contains(qpat, case=False, regex=True)])
+        hits = pd.concat(hit_parts)
+        if qlang != "English" and any(numbering(s_, v_) == "vulgate" for s_, v_, _ in parts):
+            st.caption(f"ℹ️ Douay-Rheims isn't paired with the {qlang} translation, so it can't be searched in {qlang}.")
         m1, m2, m3 = st.columns(3)
         stat_tile(m1, f"{len(hits):,}", "matching verses")
         stat_tile(m2, f"{hits['book'].nunique():,}", f"{'books / surahs' if where != 'Current selection' else unit.lower() + 's'}")
-        stat_tile(m3, f"{(len(hits) / max(len(base), 1) * 100):.2f}%", "of verses in scope")
+        stat_tile(m3, f"{(len(hits) / max(n_base, 1) * 100):.2f}%", "of verses in scope")
         st.write("")
         if len(hits):
             by = (hits.groupby(["scripture", "book_num", "short_book"]).size()
@@ -878,15 +1183,27 @@ with tabs[2]:
             elif order == "Shortest first":
                 show = show.sort_values("n_words")
             for i, (_, r) in enumerate(show.head(n_show).iterrows()):
-                st.markdown(verse_html(as_sentence(r) if whole else dict(r), pattern=qpat),
-                            unsafe_allow_html=True)
-            download_link("⬇️ Download all results (CSV)",
-                          hits[["scripture", "version", "ref", "text"]].to_csv(index=False).encode(),
-                          f"search_{q.strip().replace(' ', '_')}.csv", "text/csv")
+                row = as_sentence(r) if whole else dict(r)
+                if qlang == "English":
+                    st.markdown(verse_html(row, pattern=qpat), unsafe_allow_html=True)
+                else:
+                    st.markdown(verse_html(row, comp_patterns={qlang: qpat}), unsafe_allow_html=True)
+            # CSV: the English plus the searched language and every translation that is switched on
+            out_langs = list(dict.fromkeys(([] if qlang == "English" else [qlang]) + active_langs()))
+            csv_parts = []
+            for (s_, v_, _), h_ in zip(parts, hit_parts):
+                h_ = h_[["scripture", "version", "ref", "text"]].copy()
+                for lang in out_langs:
+                    h_[lang] = comp_series(s_, v_, lang, quran_choice(lang)).loc[h_.index]
+                csv_parts.append(h_)
+            download_link("⬇️ Download all results (CSV)", pd.concat(csv_parts).to_csv(index=False).encode("utf-8-sig"),
+                          "search_" + re.sub(r"\W+", "_", q.strip()) + ".csv", "text/csv")
         else:
-            st.info("No matches. Try “Word & its forms” or a wider scope.")
+            st.info("No matches. Try “Word & its forms”, “Anywhere in text” or a wider scope.")
     else:
-        st.info("Type a word above. Try **mercy**, **light**, **neighbour**, **orphan**, **garden** or **covenant**.")
+        st.info({"English": "Type a word above. Try **mercy**, **light**, **neighbour**, **orphan**, **garden** or **covenant**.",
+                 "Persian": "Type a Persian word above, e.g. **رحمت**، **نور**، **صبر** or **بهشت**.",
+                 "Spanish": "Type a Spanish word above, e.g. **misericordia**, **luz**, **paciencia** or **huérfano**."}[qlang])
 
 # ======================================================================================
 # 4. WORD CLOUD
@@ -1048,10 +1365,10 @@ with tabs[4]:
 
     f1, f2 = st.columns(2)
     with f1:
-        fig = px.box(length_quantiles(), x="scripture", y="n_words", color="scripture", color_discrete_map=COLORS,
-                     points=False, title="Verse length by scripture", labels={"n_words": "Words per verse",
-                                                                             "scripture": ""})
-        fig.update_layout(showlegend=False)
+        fig = go.Figure([go.Box(x=[r.scripture], q1=[r.q1], median=[r.median], q3=[r.q3], mean=[r.mean],
+                                lowerfence=[r.lo], upperfence=[r.hi], name=r.scripture, marker_color=COLORS[r.scripture],
+                                boxmean=True) for r in length_quantiles().itertuples()])
+        fig.update_layout(showlegend=False, title="Verse length by scripture", yaxis_title="Words per verse")
         st.plotly_chart(style_fig(fig, 420), key="box_len")
     with f2:
         tone = tone_c(scripture, version, section)
@@ -1090,14 +1407,34 @@ with tabs[5]:
     guard("cmp_v", cvs)
     cv = c3.selectbox("Verse", cvs, key="cmp_v")
     c4.write("")
-    c4.button("🎲 Random verse", use_container_width=True, on_click=random_compare)
+    c4.button("🎲 Random verse", **STRETCH, on_click=random_compare)
 
-    found = []
-    for v in versions:
-        vd = get(scripture, v)
-        m = vd[(vd["book"] == cbook) & (vd["chapter"] == cch) & (vd["verse"] == cv)]
-        if len(m):
-            found.append(m.iloc[0].to_dict())
+    # The chosen translation first; in the others the same verse may carry another number (JPS 1917 follows the
+    # Hebrew numbering, the English Bibles the English one), so each is located through the Hebrew text.
+    found, renumbered = [], False
+    for v in [version] + [x for x in versions if x != version]:
+        bd = get(scripture, v)
+        bd = bd[bd["book"] == cbook]
+        refs = aligned_refs(scripture, version, v, cbook, cch, cv)
+        m = bd[[(c, x) in refs for c, x in zip(bd["chapter"], bd["verse"])]].sort_values(["chapter", "verse"])
+        if not len(m):
+            continue
+        r = m.iloc[0].to_dict()
+        if len(m) > 1:
+            last = m.iloc[-1]
+            r.update(text=" ".join(m["text"]), n_words=int(m["n_words"].sum()),
+                     ref=r["ref"] + (f"–{last.verse}" if last.chapter == r["chapter"] else f"–{last.chapter}:{last.verse}"))
+            if last.chapter == r["chapter"]:
+                r.update(verse_first=int(r["verse"]), verse_last=int(last.verse))
+        renumbered |= refs != [(cch, cv)]
+        found.append(r)
+    if renumbered:
+        st.caption("ℹ️ This verse has a different number in some translations: JPS 1917 follows the Hebrew "
+                   "numbering, the English Bibles the English one. Each card shows that translation's own reference.")
+    if scripture == "Bible" and cbook not in NEW_TESTAMENT and any(numbering(scripture, r["version"]) == "vulgate"
+                                                                   for r in found):
+        st.caption("ℹ️ Douay-Rheims follows the Latin Vulgate's numbering (e.g. most Psalms are one number lower), "
+                   "so its verse here may not be the same one.")
     if found:
         o = original_for(found[0])
         if o and o.get("text"):
@@ -1134,15 +1471,15 @@ with tabs[6]:
                              help="Scripture theme: a background drawn for each scripture, with its own shade "
                                   "and pattern for every book.")
         for i, f in enumerate(favs):
+            fid = re.sub(r"\W+", "_", f["ref"] + "_" + f["version"])  # stable key, survives removing others
             st.markdown(verse_html(f), unsafe_allow_html=True)
-            a, c, b, _ = st.columns([1, 1, 1, 3])
-            png = card_png(f, style)
-            download_link("🖼️ Quote card", png, f"{f['ref'].replace(' ', '_').replace(':', '-')}.png", "image/png",
-                          target=a, full_width=True)
-            share_button(png, f, c)
-            if b.button("🗑️ Remove", key=f"rm_{i}", use_container_width=True):
+            a, b, _ = st.columns([1, 1, 4])
+            show_card = card_toggle(f"fav_{fid}", a)
+            if b.button("🗑️ Remove", key=f"rm_{fid}", **STRETCH):
                 favs.pop(i)
                 st.rerun()
+            if show_card:
+                card_panel(f, style)
         md = "\n\n".join(f"> {f['text']}\n>\n" + (f"> {f['original']}\n>\n" if f.get("original") else "")
                            + "".join(f"> {f[k.lower()]}\n>\n" for k in comp.LANGS if f.get(k.lower()))
                            + f"> — **{f['ref']}** ({f['version']})" for f in favs)
@@ -1150,7 +1487,4 @@ with tabs[6]:
         download_link("⬇️ Export as Markdown", md.encode(), "my_verses.md", "text/markdown", target=x1)
         download_link("⬇️ Export as CSV", pd.DataFrame(favs).to_csv(index=False).encode(),
                       "my_verses.csv", "text/csv", target=x2)
-        st.write("")
-        with st.expander("👀 Preview a quote card"):
-            sel = st.selectbox("Verse", range(len(favs)), format_func=lambda j: favs[j]["ref"], key="prev_sel")
-            show_png(card_png(favs[sel], style), width=420)
+

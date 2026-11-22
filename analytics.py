@@ -66,7 +66,8 @@ def word_pattern(word: str, forms: bool) -> str:
 
 
 def theme_pattern(theme: str) -> str:
-    return "|".join(rf"\b{re.escape(w)}\b" for w in THEMES[theme]["words"])
+    # one word boundary around a single alternation is several times faster than \bw1\b|\bw2\b|...
+    return r"\b(?:" + "|".join(re.escape(w) for w in THEMES[theme]["words"]) + r")\b"
 
 
 def theme_filter(df: pd.DataFrame, theme: str | None) -> pd.DataFrame:

@@ -27,14 +27,18 @@ The sidebar filters cascade **Scripture → Version → Section → Book/Surah**
 
 - **✨ Inspire**: random or "verse of the day" by theme (Love, Peace, Mercy, Hope, Patience…),
   *One theme, three traditions* (one verse from each scripture side by side), and a theme radar chart.
-- **📖 Read**: chapter reader with a side-by-side parallel translation and word highlighting.
-- **🔍 Search**: word, word-form or phrase search in the current selection or across all three; hit chart and CSV export.
+- **📖 Read**: chapter reader with **Go to a verse** (`John 3:16`, `Psalm 23`, `1 Cor 13:4`, `2:255`, `Al-Baqara 255`),
+  ◀ / ▶ chapter buttons, a side-by-side second translation matched verse by verse, and word highlighting.
+- **🔍 Search**: word, word-form or phrase search in **English, Persian or Spanish**, in the current selection or across
+  all three; hit chart and CSV export (with the active translations). Persian matches ي/ی and ك/ک alike and ignores
+  vowel marks; Spanish ignores accents (*senor* finds *Señor*).
 - **☁️ Word Cloud**: shapes (heart, star, arch, circle), palettes, filler-word filtering, three-scripture
   comparison, "words around a keyword", PNG download.
 - **📊 Word Insights**: pick words, then compare frequency per 10k words across the scriptures, across books
   (line and heatmap), word companions (co-occurrence) and frequency across translations. Also a corpus profile
   (top words, sunburst, verse length, tone arc).
-- **⚖️ Compare Translations**: one verse in every translation, plus the words they all share.
+- **⚖️ Compare Translations**: one verse in every translation, plus the words they all share. Where translations number
+  a verse differently (JPS 1917 follows the Hebrew numbering: JPS Genesis 32:1 = KJV 31:55) the right verse is shown.
 - **⭐ My Collection**: save verses, export Markdown/CSV and download shareable **quote-card images**.
 
 ## Quote cards
@@ -45,7 +49,7 @@ own shade and pattern for every book: emerald with a gold eight-pointed-star lat
 rays of light for the Bible, parchment between scroll rollers for the Torah. The older flat gradients remain in the
 style menu.
 
-**📤 Share** (next to 🖼️ Quote card) opens the device's share sheet with the card attached as a picture: choose Mail
+Press **🖼️ Quote card** under a verse to preview the card, then **⬇️ Download** or **📤 Share**. Share opens the device's share sheet with the card attached as a picture: choose Mail
 and the recipient sees the card in the email (or pick WhatsApp, Messages…). Browsers that can't share files, such as
 Firefox on desktop, copy the card instead and open a new email: paste it in with Ctrl/⌘+V.
 

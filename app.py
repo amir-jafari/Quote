@@ -29,7 +29,8 @@ st.set_page_config(page_title="Sacred Words Explorer", page_icon="📜", layout=
 
 
 # --------------------------------------------------------------------------------------
-# Password gate: the password comes from st.secrets["APP_PASSWORD"]
+# Optional password gate: the password comes from st.secrets["APP_PASSWORD"]; if it is
+# missing or empty, the app is open to everyone
 # (.streamlit/secrets.toml locally, the app's "Secrets" settings on Streamlit Cloud)
 # --------------------------------------------------------------------------------------
 def _check_password() -> bool:
@@ -39,9 +40,10 @@ def _check_password() -> bool:
         return True
     try:
         expected = st.secrets["APP_PASSWORD"]
-    except Exception:  # missing key or no secrets file
-        st.error("This app is locked: no `APP_PASSWORD` is configured in its secrets.")
-        return False
+    except Exception:  # missing key or no secrets file -> no password gate
+        return True
+    if not str(expected).strip():  # empty password -> no password gate
+        return True
 
     def _entered():
         ok = hmac.compare_digest(st.session_state.get("pw_input", ""), str(expected))
